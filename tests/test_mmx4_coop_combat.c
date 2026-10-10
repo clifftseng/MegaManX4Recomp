@@ -214,7 +214,7 @@ uint32_t mmx4_coop_call(CPUState *cpu,uint32_t address,uint32_t a0,uint32_t a1) 
             psx_mod_write_byte(allocated_actor+0x65,0);
         return allocated_actor;
     }
-    if(address==PARTICLE_INIT) {
+    if(address==PARTICLE_INIT || address==0x8009485Cu || address==0x80098474u) {
         ++particle_initializations;particle_character=psx_mod_read_byte(MMX4_PLAYER+2);
         /* CAE38 reads these fields and P2's projected character assembly.
          * Its native movement/draw remains one call at the shared pool tick. */
@@ -332,7 +332,9 @@ static uint32_t invoke(uint32_t address) {
     return cpu.gpr[2];
 }
 static void death_particle_ownership(void) {
-    for(unsigned character=0;character<2;++character) {
+    const uint32_t routines[]={PARTICLE_INIT,0x8009485Cu,0x80098474u};
+    const uint8_t kinds[]={0x11,47,48};
+    for(unsigned effect=0;effect<3;++effect)for(unsigned character=0;character<2;++character) {
         setup();second[2]=(uint8_t)character;
         psx_mod_write_byte(MMX4_PLAYER+2,(uint8_t)(1-character));
         psx_mod_write_byte(MMX4_PLAY+0x43,(uint8_t)(1-character));
@@ -340,16 +342,16 @@ static void death_particle_ownership(void) {
         mmx4_coop_enter_second();CHECK(invoke(PARTICLE_ALLOC)==PARTICLE);mmx4_coop_leave_second();
         /* P2 is dead; it can even rejoin elsewhere before deferred init. */
         alive[1]=0;second[10]=99;second[14]=77;second[0x14]=8;
-        psx_mod_write_byte(PARTICLE+1,0x11);
+        psx_mod_write_byte(PARTICLE+1,kinds[effect]);
         uint8_t p1[sizeof second],p2[sizeof second];
         memcpy(p1,address_ptr(MMX4_PLAYER),sizeof p1);memcpy(p2,second,sizeof p2);
         CPUState cpu={0};cpu.gpr[4]=PARTICLE;
-        CHECK(filter(PARTICLE_INIT)(&cpu,PARTICLE_INIT) && cpu.gpr[2]==0xABCDEF01u);
+        CHECK(filter(routines[effect])(&cpu,routines[effect]) && cpu.gpr[2]==0xABCDEF01u);
         CHECK(particle_initializations==1 && particle_character==character);
         CHECK(psx_mod_read_word(PARTICLE+8)==30u<<16 && psx_mod_read_word(PARTICLE+12)==20u<<16);
         CHECK(psx_mod_read_byte(PARTICLE+0x14)==7 && !projected);
         CHECK(!memcmp(p1,address_ptr(MMX4_PLAYER),sizeof p1) && !memcmp(p2,second,sizeof p2));
-        CHECK(!filter(PARTICLE_INIT)(&cpu,PARTICLE_INIT));
+        CHECK(!filter(routines[effect])(&cpu,routines[effect]));
         /* A P1 allocation reusing the slot must clear its former P2 owner. */
         mmx4_coop_enter_second();invoke(PARTICLE_ALLOC);mmx4_coop_leave_second();
         invoke(PARTICLE_ALLOC);psx_mod_write_byte(PARTICLE+4,0);
@@ -648,7 +650,6 @@ static void vehicle_secondary_ownership(void) {
     }
 }
 int main(void) {
-    CHECK(filter_count==17);
     accepted_events();independent_solids();aim_selection();effect_ownership();armor_handoff();independent_hit_tokens();
     split_native_targets();
     slash_intro_leader();

@@ -298,10 +298,11 @@ static int allocate_particle(CPUState *cpu,uint32_t address) {
     }
     return mmx4_coop_finish(cpu,actor);
 }
-static int initialize_death_particle(CPUState *cpu,uint32_t address) {
+static int initialize_character_particle(CPUState *cpu,uint32_t address) {
     uint32_t actor=cpu->gpr[4];int slot=particle_slot(actor);
+    unsigned kind=psx_mod_read_byte(actor+1);
     if(particle_init_call || !mmx4_coop_ready() || slot<0 || !particles[slot].owner ||
-       psx_mod_read_byte(actor+1)!=0x11 || psx_mod_read_byte(actor+4))return 0;
+       (kind!=0x11 && kind!=47 && kind!=48) || psx_mod_read_byte(actor+4))return 0;
     particle_init_call=1;
     int entered=!mmx4_coop_projected();
     if(entered)mmx4_coop_enter_second();
@@ -310,13 +311,15 @@ static int initialize_death_particle(CPUState *cpu,uint32_t address) {
     psx_mod_write_word(MMX4_PLAYER+8,particles[slot].x);
     psx_mod_write_word(MMX4_PLAYER+12,particles[slot].y);
     psx_mod_write_byte(MMX4_PLAYER+0x14,particles[slot].screen);
-    /* The normal projection also supplies P2's private assembly/palette.
-     * Do not require alive(): this callback belongs to an already dead seat. */
+    /* Death11 and elemental fragments47/48 defer character resources and
+     * the source body reads until the shared pool pass. Preserve their
+     * allocating origin even if that body moved, died or warped meanwhile. */
     uint32_t result=mmx4_coop_call(cpu,address,actor,cpu->gpr[5]);
     psx_mod_write_word(MMX4_PLAYER+8,x);psx_mod_write_word(MMX4_PLAYER+12,y);
     psx_mod_write_byte(MMX4_PLAYER+0x14,screen);
     if(entered)mmx4_coop_leave_second();
     particles[slot].owner=0;
+    psx_mod_counter_add("mmx4.coop.p2-character-particle-inits",1);
     particle_init_call=0;
     return mmx4_coop_finish(cpu,result);
 }
@@ -656,7 +659,9 @@ PSX_MOD_CONSTRUCTOR(mmx4_register_coop_combat) {
     psx_mod_register_function_filter_plugin(COOP_ID,0x800AF22Cu,personal_effect);
     psx_mod_register_function_filter_plugin(COOP_ID,0x800AEED8u,personal_effect);
     psx_mod_register_function_filter_plugin(COOP_ID,PARTICLE_ALLOCATE,allocate_particle);
-    psx_mod_register_function_filter_plugin(COOP_ID,PARTICLE_INITIALIZE,initialize_death_particle);
+    psx_mod_register_function_filter_plugin(COOP_ID,PARTICLE_INITIALIZE,initialize_character_particle);
+    psx_mod_register_function_filter_plugin(COOP_ID,0x8009485Cu,initialize_character_particle);
+    psx_mod_register_function_filter_plugin(COOP_ID,0x80098474u,initialize_character_particle);
     psx_mod_register_function_filter_plugin(COOP_ID,ARMOR_UPDATE,armor_world_update);
     psx_mod_register_function_filter_plugin(COOP_ID,0x80021234u,survivor_actor_pool);
     psx_mod_register_function_filter_plugin(COOP_ID,0x8002144Cu,survivor_actor_pool);

@@ -69,6 +69,7 @@ class Scenarios:
             p=pool[i*0x9c:(i+1)*0x9c]
             if p[0]:
                 result.append(dict(slot=i,type=p[1],hp=p[0x5c]&127,state=list(p[4:7]),
+                                   weakness=hex(struct.unpack_from('<I',p,0x58)[0]),reaction=p[0x63],
                                    timer=struct.unpack_from('<H',p,0x7c)[0],
                                    captured=p[0x8d],capture_timer=struct.unpack_from('<H',p,0x8a)[0],
                                    x=struct.unpack_from('<i',p,8)[0]/65536,
@@ -379,6 +380,68 @@ class Scenarios:
             finally:self.r.release()
         (self.output/'dash-effects.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
         return dict(frames=len(rows),types=sorted({e['type'] for row in rows for e in row['effects']}))
+
+    def zero_elemental(self):
+        self.load(1,0)
+        zero=self.campaign^1
+        self.r.fixture(7,zero,0,1)
+        self.r.teleport_both(56,139);self.r.teleport(zero,112,139)
+        self.wait('elemental-both-grounded',lambda s:all(p['grounded'] for p in s['players']),5)
+        rows=[]
+        for move in ('fire','ice'):
+            self.r.teleport(zero,112,139)
+            if move=='ice':
+                self.r.input(0xbfff,zero);time.sleep(.2)
+            # Zero's techniques use Triangle; Square is the ordinary saber
+            # combo/air spin and does not reproduce the elemental report.
+            self.r.input(0xefef if move=='fire' else 0xefbf,zero)
+            try:
+                for frame in range(12):
+                    row=self.sample('zero-%s-%d'%(move,frame),True)
+                    data=self.r.read(0x8013e510,32*0x70)
+                    row['effects']=[dict(slot=i,type=p[1],state=list(p[:8]),
+                        x=struct.unpack_from('<i',p,8)[0]/65536,y=struct.unpack_from('<i',p,12)[0]/65536,
+                        parent=hex(struct.unpack_from('<I',p,0x50)[0]),sprites=hex(struct.unpack_from('<I',p,0x38)[0]),
+                        assembly=hex(struct.unpack_from('<I',p,0x3c)[0]))
+                        for i in range(32) if (p:=data[i*0x70:(i+1)*0x70])[0]]
+                    data=self.r.read(0x80173ca0,64*0x60)
+                    row['particles']=[dict(slot=i,type=p[1],state=list(p[:8]),
+                        x=struct.unpack_from('<i',p,8)[0]/65536,y=struct.unpack_from('<i',p,12)[0]/65536,
+                        sprites=hex(struct.unpack_from('<I',p,0x38)[0]),assembly=hex(struct.unpack_from('<I',p,0x3c)[0]))
+                        for i in range(64) if (p:=data[i*0x60:(i+1)*0x60])[0]]
+                    rows.append(row);time.sleep(.015)
+            finally:self.r.release()
+            self.wait('elemental-finished-'+move,lambda s:s['players'][zero]['grounded'] and
+                s['players'][zero]['state']==1 and s['players'][zero]['action']==2,6)
+        (self.output/'zero-elemental.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
+        return dict(zero_seat=zero,frames=len(rows),actions=sorted({r['players'][zero]['action'] for r in rows}),
+            effect_types=sorted({e['type'] for r in rows for e in r['effects']}),
+            particle_types=sorted({p['type'] for r in rows for p in r['particles']}))
+
+    def fire_weakness(self):
+        self.cyber()
+        self.wait('weakness-cyber-fight-live',lambda s:not s['blocked'] and not s['warning'] and
+            any(e['type']==64 and e['hp']>1 for e in self.enemies()),20,True)
+        self.r.fixture(7,1,4 if self.campaign else 0,1)
+        boss=next(e for e in self.enemies() if e['type']==64 and e['hp']>1)
+        before=boss['hp'];rows=[]
+        for attempt in range(10):
+            target=next((e for e in self.enemies() if e['type']==64 and e['hp']>0),None)
+            if target is None:break
+            # Enter from the observed floor, then the native fire technique
+            # reaches the boss vertically. P1 stays outside attack range.
+            self.r.teleport(1,int(target['x']),2507)
+            self.r.input(0x7fff if self.campaign else 0xefef,1);time.sleep(.12);self.r.release()
+            for frame in range(10):
+                row=self.sample('p2-fire-weakness-%d-%d'%(attempt,frame),frame%3==0)
+                row['bosses']=[e for e in self.enemies() if e['type']==64]
+                rows.append(row);time.sleep(.025)
+            if any(e['reaction']==255 for r in rows for e in r['bosses']):break
+        (self.output/'fire-weakness.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
+        damage=min((e['hp'] for r in rows for e in r['bosses']),default=before)
+        assert damage<before,('P2 fire did no damage',before,damage)
+        assert any(e['reaction']==255 for r in rows for e in r['bosses']),('No native weakness reaction',before,damage)
+        return dict(before_hp=before,after_hp=damage,native_weakness_reaction=True,campaign=self.campaign)
 
     def volcano_probe(self):
         self.load(4,1,3)
@@ -1312,7 +1375,7 @@ def main():
     parser.add_argument('--clears',type=lambda p:int(p,0),default=16,help='Expected boss bits on cold native card load')
     parser.add_argument('--hold-on-failure',type=int,default=0,
                         help='Keep only this owned hidden process alive for bounded TCP investigation')
-    parser.add_argument('--cases', nargs='+', choices=('jet','bike_probe', 'cyber','handoff_dash','section_health','dash_effects','cyber_flip_probe','cyber_flip','storm_warp', 'intro','intro_entry','trail_probe','post_victory_trails','open_airdash','train_visual','door_death','train_return','train_deaths','train_boss','arrival_death','combat','jet_boss',
+    parser.add_argument('--cases', nargs='+', choices=('jet','bike_probe', 'cyber','handoff_dash','section_health','dash_effects','zero_elemental','fire_weakness','cyber_flip_probe','cyber_flip','storm_warp', 'intro','intro_entry','trail_probe','post_victory_trails','open_airdash','train_visual','door_death','train_return','train_deaths','train_boss','arrival_death','combat','jet_boss',
                         'spider_visual','cyber_missiles','spider_hole','victory','diagnostics','audio',
                         'cyber_orb','cyber_course','cyber_moving','volcano_probe','volcano_entry','save_loop','second_save_loop','stage_reentry','portrait_exit','portrait_escape','reload_save','enemy_activation'), default=['jet', 'cyber', 'intro'])
     args = parser.parse_args()

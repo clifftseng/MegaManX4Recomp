@@ -536,3 +536,30 @@ The private checkpoint fixture now allows Storm Owl's verified original
 section0 entries0-4 and section1 entries0-1. Section0 entry5 actually starts
 section1's record list and is excluded. Original authored checkpoint4 is
 X5856/Y2048, camera5696/2048, and lands at2235/2234.
+
+## Elemental fragments and weapon fixtures (2026-10-10)
+
+Native Ryuenjin57 and Hyouretsuzan54 use Triangle with Up/Down; Square
+instead exercised ordinary saber48/air-spin56 in the first diagnostic probe.
+QA67 reproduces broken fragments after the real techniques. Particle48's
+80098474 deferred initializer reads the character assembly header6 from
+scratchpad+1C and the singleton player's position. Ice particle47 initializer
+8009485C also binds that character header. Zero/P2 particles were initialized
+with X/P1's assembly801ACC0C instead of their counterpart resources.
+
+Extend the existing allocation-time character/origin handling from death11
+to these two inspected initializers. Their later shared updates remain native
+and run once. QA68 shows proper blue ice shards rather than yellow/brown
+rectangles, binds Zero's retained private assembly9F09A9A8, and keeps flame
+and ice blade graphics healthy. QA69 verifies the corresponding native
+Zero/P1 techniques alongside X/P2. Inspected captures agree. All16 title
+CTests pass, including a dead/moved/rejoined allocator and original slot reuse.
+
+Development command7 selects a seat's native weapon and optionally unlocks
+the shared P1 campaign's boss progress. It runs37104/371E4 at the native
+boundary, and the existing admitted netplay packet can carry it without RAM
+writes. Python helper accepts `weapon SEAT WEAPON UNLOCK_ALL`; ordinary release
+netplay does not enable the development packet decoder. Both-decoder protocol
+tests verify the command fields agree. This removes repeated stage clears from
+native weapon/weakness qualification. Original PL archives were catalogued
+locally for diagnosis; no original assets are committed.

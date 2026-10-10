@@ -586,6 +586,17 @@ static int development_fixture(CPUState *cpu,uint32_t address) {
     }else if(command==5) {
         fixture_invulnerable=first_arg&3u;
         psx_mod_write_word(diagnostic+0x54,1);
+    }else if(command==7 && mmx4_coop_ready() && first_arg<2 && second_arg<=8 && third_arg<=1) {
+        /* Weapon/progress setup follows the same admitted native boundary
+         * in offline and development netplay; P1 still owns all progress. */
+        if(third_arg)psx_mod_write_byte(PLAY+0x59,255);
+        psx_mod_write_byte(PLAYER+0xB9,psx_mod_read_byte(PLAY+0x59));
+        if(first_arg)enter_second();
+        psx_mod_write_byte(PLAY+0x60,(uint8_t)second_arg);
+        psx_mod_write_byte(PLAYER+0x93,(uint8_t)second_arg);
+        guest(cpu,0x80037104u,PLAYER,0);guest(cpu,0x800371E4u,PLAYER,0);
+        if(first_arg)leave_second();
+        psx_mod_write_word(diagnostic+0x54,1);
     }else if(command==6 && first_arg<48 && second_arg>0 && second_arg<128) {
         uint32_t actor=0x8013BED0u+first_arg*0x9Cu;
         if(psx_mod_read_byte(actor)) {
