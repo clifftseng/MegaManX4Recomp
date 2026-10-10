@@ -513,3 +513,26 @@ followed by each seat dashing through arrival:96 captures per roster, both
 healthy and unlocked. Uncapped hidden frame progression stays around113-131fps
 for idle/dashing windows; no severe slowdown is reproduced in those paths.
 Other equivalent events and netplay timing remain separate qualification.
+
+## Surviving-player death lock and Storm Owl section handoff (2026-10-10)
+
+QA62 reproduces the survivor lock after P1 dies at Storm Owl checkpoint4:
+P2 stays HP32/lives2, but PLAY+1C remains1. Native write tracing identifies
+80033C7C in80033BC8, before the death animation guard. Preserve the lock
+present before fatal detection when the other player has a living body;
+an outgoing/incoming passenger counts as living, while voluntary withdrawal
+and genuine corpses do not. Native team-wipe control locks are unchanged.
+
+QA63 manual / QA64 reach the original miniboss18 after genuine P1 death,
+then kill it with actual P2 Jump/attack after an HP1 setup and finish the
+native transfer into section1 with P2 HP32/two shared lives, P1 still dead,
+and global lock clear. Both character arrangements pass. QA64 additionally
+passes a leader dying during partner arrival, then each fatal doorway owner:
+survivor HP32, clear C0/C4 gates, exactly one native death sequence each.
+All16 title CTests pass, including ordinary/hidden living partners in both
+death orders and preservation of actual preexisting scene locks.
+
+The private checkpoint fixture now allows Storm Owl's verified original
+section0 entries0-4 and section1 entries0-1. Section0 entry5 actually starts
+section1's record list and is excluded. Original authored checkpoint4 is
+X5856/Y2048, camera5696/2048, and lands at2235/2234.

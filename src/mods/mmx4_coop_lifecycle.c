@@ -40,7 +40,7 @@ static uint8_t departure_active, departure_visible;
 static uint8_t departure_vehicle_active, departure_vehicle_visible;
 static unsigned menu_active, menu_owner, menu_projecting;
 static unsigned normal_guard, menu_guard, world_guard, pickup_guard;
-static unsigned collect_guard, save_guard, reward_guard, death_guard, capsule_guard;
+static unsigned collect_guard, save_guard, reward_guard, death_guard, death_check_guard, capsule_guard;
 static unsigned scene_guard, script_pool_guard, command_guard, control_guard,text_guard,text_init_guard;
 static unsigned flip_guard;
 static unsigned script_active, script_owner, script_serial;
@@ -822,10 +822,29 @@ static int campaign_save(CPUState *cpu,uint32_t address) {
     save_guard=0;mmx4_coop_enter_second();
     return mmx4_coop_finish(cpu,result);
 }
+static int living_death_partner(void) {
+    unsigned other=mmx4_coop_projected()?0u:1u;
+    const uint8_t *body=other?mmx4_coop_second_body():mmx4_coop_first_body();
+    /* Outgoing/incoming passengers still have a life to preserve, even
+     * while alive() excludes them from attacks and native AI targeting. */
+    return !(other && departed) && (body[0x5C]&127u) && body[4]!=2;
+}
+static int death_detection(CPUState *cpu,uint32_t address) {
+    if(death_check_guard || !mmx4_coop_ready() || cpu->gpr[4]!=PLAYER ||
+       !living_death_partner())return 0;
+    uint8_t scene_lock=psx_mod_read_byte(PLAY+0x1C);
+    death_check_guard=1;
+    uint32_t result=mmx4_coop_call(cpu,address,cpu->gpr[4],cpu->gpr[5]);
+    death_check_guard=0;
+    /* Native80033C7C acquires a single-player death lock before the death
+     * animation can preserve it. Keep any prior real scene lock, but let
+     * the surviving partner continue gameplay after a new fatal hit. */
+    if(psx_mod_read_byte(PLAYER+4)==2)psx_mod_write_byte(PLAY+0x1C,scene_lock);
+    return mmx4_coop_finish(cpu,result);
+}
 static int death_animation(CPUState *cpu,uint32_t address) {
     if(death_guard || !mmx4_coop_ready())return 0;
-    unsigned other=mmx4_coop_projected()?0u:1u;
-    if(!mmx4_coop_alive(other))return 0;
+    if(!living_death_partner())return 0;
     uint8_t gates[9];read_bytes(PLAY+0x12,gates,9);
     uint8_t scene_lock=psx_mod_read_byte(PLAY+0x1C);
     unsigned initial=psx_mod_read_byte(PLAYER+5)==0;
@@ -1158,6 +1177,7 @@ PSX_MOD_CONSTRUCTOR(mmx4_register_coop_lifecycle) {
     psx_mod_register_function_filter_plugin(ID,0x8001C07Cu,campaign_save);
     psx_mod_register_function_filter_plugin(ID,0x8001C3E8u,campaign_save);
     psx_mod_register_function_filter_plugin(ID,0x80035A6Cu,death_animation);
+    psx_mod_register_function_filter_plugin(ID,0x80033BC8u,death_detection);
     psx_mod_register_function_filter_plugin(ID,0x8002166Cu,stage_scripts);
     psx_mod_register_function_filter_plugin(ID,0x8002AD7Cu,shared_ride_ready);
     psx_mod_register_function_filter_plugin(ID,0x80021D20u,script_text);

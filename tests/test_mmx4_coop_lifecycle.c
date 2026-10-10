@@ -59,6 +59,7 @@ int mmx4_coop_ready(void) {return ready;}
 int mmx4_coop_split_views(void) {return split_views;}
 int mmx4_coop_projected(void) {return (int)projected;}
 uint8_t *mmx4_coop_second_body(void) {return p2;}
+uint8_t *mmx4_coop_first_body(void) {return p1_backup;}
 uint8_t *mmx4_coop_second_vehicle(void) {return p2_vehicle;}
 uint8_t *mmx4_coop_first_vehicle(void) {return p1_vehicle_backup;}
 void mmx4_coop_clear_current_attacks(void) {}
@@ -215,6 +216,13 @@ uint32_t mmx4_coop_call(CPUState *cpu,uint32_t address,uint32_t a0,uint32_t a1) 
         for(unsigned i=0x12;i<=0x1A;++i)psx_mod_write_byte(MMX4_PLAY+i,1);
         psx_mod_write_byte(MMX4_PLAY+0x1C,1);psx_mod_write_byte(MMX4_PLAYER+4,3);
         break;
+    case 0x80033BC8:
+        if(psx_mod_read_byte(MMX4_PLAYER+0x5C)==128) {
+            psx_mod_write_byte(MMX4_PLAYER+0x5C,0);
+            psx_mod_write_byte(MMX4_PLAYER+4,2);
+            psx_mod_write_byte(MMX4_PLAY+0x1C,1);
+        }
+        break;
     case 0x8001FA24:
         ++reward_calls;
         psx_mod_write_byte(MMX4_PLAY+0x59,(uint8_t)(psx_mod_read_byte(MMX4_PLAY+0x59)|
@@ -321,6 +329,22 @@ int main(void) {
         CHECK(psx_mod_read_word(PLAYER+12)==971u<<16 && !memcmp(original,p2+12,4));
         CHECK(flip_world_calls==2 && flip_second_calls==2 && !projected);
     }
+    reset();
+    for(unsigned seat=0;seat<2;++seat)for(unsigned lock=0;lock<2;++lock)for(unsigned hidden=0;hidden<2;++hidden) {
+        reset();psx_mod_write_byte(PLAY+0x1C,(uint8_t)lock);
+        if(hidden) {warp_phase=2;warp_owner=seat;}
+        if(seat)mmx4_coop_enter_second();
+        psx_mod_write_byte(PLAYER+0x5C,128);
+        mmx4_coop_call(&cpu,0x80033BC8u,PLAYER,0);
+        CHECK(psx_mod_read_byte(PLAYER+4)==2 && !psx_mod_read_byte(PLAYER+0x5C));
+        CHECK(psx_mod_read_byte(PLAY+0x1C)==lock);
+        CHECK(living_death_partner());
+        if(seat)mmx4_coop_leave_second();
+        CHECK(seat?psx_mod_read_byte(PLAYER+0x5C)==16:p2[0x5C]==12);
+    }
+    reset();p2[0x5C]=0;p2[4]=3;psx_mod_write_byte(PLAYER+0x5C,128);
+    mmx4_coop_call(&cpu,0x80033BC8u,PLAYER,0);
+    CHECK(psx_mod_read_byte(PLAY+0x1C)==1); /* Native team-wipe lock. */
     reset();
     Inventory original_second=second_inventory,original_saved=saved_inventory;
     uint32_t inventory_digest=mmx4_coop_lifecycle_digest(2166136261u);
