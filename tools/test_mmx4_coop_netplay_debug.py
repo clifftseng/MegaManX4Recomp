@@ -44,6 +44,7 @@ def main():
     parser.add_argument('--cameras', choices=('unified', 'split'), default='unified')
     parser.add_argument('--campaign', type=int, choices=(0, 1), default=0)
     parser.add_argument('--doors', action='store_true', help='Also traverse the P2-led Cyber door')
+    parser.add_argument('--train-only',action='store_true',help='Qualify both Slash Split background panes and CRCs')
     parser.set_defaults(latency=0, jitter=0, seed=714, delay=2,
                         frontend='headless-opengl', boot_timeout=100, phase_timeout=35)
     args = parser.parse_args()
@@ -74,6 +75,33 @@ def main():
         exercise = Exercise(args, peers, report)
         exercise.boot(args.campaign)
         debug = NetplayDevelopment(ports[2], ports[3])
+        if args.train_only:
+            if args.cameras!='split':raise ValueError('Train scenery qualification requires --cameras split')
+            from mmx4_netplay_runtime import NetplayRuntime
+            from mmx4_web_probe import Probe
+            runtime=NetplayRuntime(debug)
+            output=args.output/'train-background';output.mkdir()
+            probe=Probe(runtime,output,args.campaign)
+            try:
+                for owner in (1,0):
+                    probe.train_background(owner,2)
+                    captures=[]
+                    for frame in (0,1):
+                        for peer in peers:
+                            shot=output/f'train-owner-{owner}-peer-{peer.seat}-frame-{frame}.png'
+                            peer.request('screenshot_hires',path=str(shot))
+                            captures.append(str(shot))
+                        time.sleep(.2)
+                    probe.cases[-1]['both_peer_captures']=captures
+                    tick=min(peer.status()['tick'] for peer in peers)
+                    exercise.checkpoint('native Slash backgrounds owner '+str(owner),tick,min_digests=2)
+            finally:
+                runtime.release()
+                (output/'stage-interactions.json').write_text(json.dumps(
+                    dict(cases=probe.cases,events=probe.events),indent=2))
+            report.update(status='passed',train_background_owners=2)
+            print('Split netplay: both native Slash backgrounds advance with matching peer CRCs',flush=True)
+            return
         debug.fixture(5, 3)
         debug.teleport(1, 160, 136)
         exercise.wait_ticks(12)

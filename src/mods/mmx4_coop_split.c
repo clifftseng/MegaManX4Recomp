@@ -9,7 +9,9 @@
 #define STATE_BYTES (VISITS_OFFSET+MMX4_COOP_PLACEMENTS/8u)
 
 static uint32_t state;
-static unsigned scanning,bounds_call,supplemental,spatial_call;
+static unsigned scanning,bounds_call,supplemental,spatial_call,background_call;
+static uint32_t background_actor,background_dx;
+static unsigned background_parallax;
 
 static void copy_bytes(uint32_t destination,uint32_t source,unsigned size) {
     for(unsigned offset=0;offset<size;++offset)
@@ -30,7 +32,8 @@ static int available(void) {
 void mmx4_coop_split_reset(void) {
     if(!state || mmx4_coop_projected() || psx_mod_local_view_scope())return;
     for(unsigned offset=0;offset<STATE_BYTES;offset+=4)psx_mod_write_word(state+offset,0);
-    scanning=bounds_call=supplemental=spatial_call=0;
+    scanning=bounds_call=supplemental=spatial_call=background_call=0;
+    background_actor=background_dx=background_parallax=0;
 }
 int mmx4_coop_split_activate(void) {
     state=mmx4_coop_split_views()?psx_mod_memory_alloc(STATE_BYTES,4):0;
@@ -72,6 +75,78 @@ static void initialize_cameras(void) {
     copy_bytes(state+16u,CAMERA,CAMERA_BYTES);
     copy_bytes(state+16u+CAMERA_BYTES,CAMERA,CAMERA_BYTES);
     psx_mod_write_word(state,1);
+}
+static uint32_t byte_word(const uint8_t *bytes,unsigned offset) {
+    return (uint32_t)bytes[offset]|(uint32_t)bytes[offset+1]<<8|
+        (uint32_t)bytes[offset+2]<<16|(uint32_t)bytes[offset+3]<<24;
+}
+static uint32_t signed_half(uint32_t value) {
+    /* Retail sra retains the sign bit, including negative odd fixed units. */
+    return (value>>1)|(value&0x80000000u);
+}
+static int train_foreground(CPUState *cpu,uint32_t address) {
+    if(background_call!=1 || cpu->gpr[4]!=background_actor)return 0;
+    /* Full native800D964C adds foreground displacement only on this branch.
+     * Observe it at the actual dispatch, after the native phase selector.
+     * A stopped train's +7 transition does not add parallax on that tick. */
+    if(psx_mod_read_byte(background_actor+7) && !psx_mod_read_byte(MMX4_PLAYER+0xBC)) {
+        background_parallax=1;
+        background_dx=psx_mod_read_word(CAMERA+8)-psx_mod_read_word(CAMERA+20);
+    }
+    background_call=2;
+    uint32_t result=mmx4_coop_call(cpu,address,cpu->gpr[4],cpu->gpr[5]);
+    background_call=1;
+    return mmx4_coop_finish(cpu,result);
+}
+static int train_background(CPUState *cpu,uint32_t address) {
+    uint32_t actor=cpu->gpr[4];
+    unsigned kind=address==0x800D8648u?19u:21u;
+    if(background_call || !available() || mmx4_coop_projected() ||
+       psx_mod_read_byte(MMX4_PLAY+12)!=8 || actor<0x801410C0u ||
+       actor>=0x80141840u || (actor-0x801410C0u)%0x60u ||
+       psx_mod_read_byte(actor+1)!=kind)return 0;
+    initialize_cameras();
+    uint8_t before[CAMERA_BYTES],after[CAMERA_BYTES];
+    read_bytes(CAMERA,before,CAMERA_BYTES);
+    background_actor=actor;background_dx=background_parallax=0;background_call=1;
+    uint32_t result=mmx4_coop_call(cpu,address,actor,cpu->gpr[5]);
+    read_bytes(CAMERA,after,CAMERA_BYTES);
+    unsigned previous=psx_mod_read_word(state+8u);
+    unsigned owner=previous?previous-1u:0u;
+    /* The train's mode5 layer helpers are no-ops. These original shared
+     * actors change the backgrounds after the player camera snapshots.
+     * Apply their writes to both saved views, never to canonical RAM again.
+     * 19/21 add +18 speed and its arithmetic half. Only type21's inspected
+     * 800D964C branch also adds foreground motion; replace that contribution
+     * with the other view's own displacement when the branch actually runs. */
+    for(unsigned seat=0;seat<2;++seat) {
+        uint32_t shadow=state+16u+seat*CAMERA_BYTES;
+        uint32_t seat_dx=psx_mod_read_word(shadow+8)-psx_mod_read_word(shadow+20);
+        for(unsigned layer=0;layer<3;++layer) {
+            unsigned base=layer*0x54u;
+            for(unsigned offset=0;offset<0x54u;++offset) {
+                if((offset>=8u && offset<16u) || (offset>=20u && offset<28u))continue;
+                if(before[base+offset]!=after[base+offset])
+                    psx_mod_write_byte(shadow+base+offset,after[base+offset]);
+            }
+            /* Shared authored limits/shake metadata are copied above, while
+             * each foreground's current/previous origins stay independent. */
+            if(!layer)continue;
+            for(unsigned axis=8;axis<=12;axis+=4) {
+                uint32_t delta=byte_word(after,base+axis)-byte_word(before,base+axis);
+                uint32_t value=psx_mod_read_word(shadow+base+axis)+delta;
+                if(background_parallax && seat!=owner && axis==8) {
+                    uint32_t native_part=layer==1?background_dx:signed_half(background_dx);
+                    uint32_t seat_part=layer==1?seat_dx:signed_half(seat_dx);
+                    value+=seat_part-native_part;
+                }
+                psx_mod_write_word(shadow+base+axis,value);
+            }
+        }
+    }
+    background_call=background_parallax=0;background_actor=background_dx=0;
+    psx_mod_counter_add("mmx4.coop.split-train-background-ticks",1);
+    return mmx4_coop_finish(cpu,result);
 }
 int mmx4_coop_split_scene_camera_begin(unsigned owner,uint8_t canonical[0xFC]) {
     if(!available() || owner>1 || mmx4_coop_lifecycle_script_owner()>=0 ||
@@ -347,6 +422,9 @@ static int actor_bounds(CPUState *cpu,uint32_t address) {
     return mmx4_coop_finish(cpu,result);
 }
 PSX_MOD_CONSTRUCTOR(mmx4_register_coop_split) {
+    psx_mod_register_function_filter_plugin(COOP_ID,0x800D8648u,train_background);
+    psx_mod_register_function_filter_plugin(COOP_ID,0x800D9218u,train_background);
+    psx_mod_register_function_filter_plugin(COOP_ID,0x800D964Cu,train_foreground);
     psx_mod_register_function_filter_plugin(COOP_ID,0x800B56F4u,spatial_stage_actor);
     psx_mod_register_function_filter_plugin(COOP_ID,0x800B6A0Cu,spatial_stage_actor);
     psx_mod_register_function_entry_plugin(COOP_ID,0x80028DB4u,reset_placements);

@@ -211,6 +211,8 @@ static int allocate_actor(CPUState *cpu, uint32_t address) {
     uint32_t actor=mmx4_coop_call(cpu,address,cpu->gpr[4],cpu->gpr[5]);
     allocation_call=0;
     if (actor) {forget_solid(actor);forget_hit(actor);}
+    if(address==0x8002AC0Cu && actor)
+        mmx4_coop_web_forget(actor,(unsigned)(mmx4_coop_projected()!=0));
     if(actor>=SECONDARY_POOL && actor<SECONDARY_POOL+SECONDARY_CAPACITY*SECONDARY_STRIDE &&
        !((actor-SECONDARY_POOL)%SECONDARY_STRIDE))
         secondary_owner[(actor-SECONDARY_POOL)/SECONDARY_STRIDE]=(uint8_t)(mmx4_coop_projected()+1);
@@ -253,7 +255,12 @@ static int personal_effect(CPUState *cpu,uint32_t address) {
        actor>=EFFECT_POOL+EFFECT_CAPACITY*EFFECT_STRIDE ||
        (actor-EFFECT_POOL)%EFFECT_STRIDE ||
        !second_effect_owner[(actor-EFFECT_POOL)/EFFECT_STRIDE])return 0;
-    /* Type 7 follows PLAYER/Double. Type 2 is X's delayed charge release:
+    /* Types0/1 defer their assembly and PLAYER/Double origin reads until
+     * the shared pool pass, then follow that owner while sliding/dashing.
+     * Type3 dust already has a fixed origin and retains its shared update.
+     * Type27 uploads Ground Hunter's compressed graphics from SCRATCH+14.
+     * This deferred pass must use the allocating X, even with Zero/P1.
+     * Type 7 follows PLAYER/Double. Type 2 is X's delayed charge release:
      * it uses the owner's assembly/pose, then allocates a native projectile
      * at 800AF0A4. Keep that allocation in the owner's private shot pool. */
     personal_effect_call=1;mmx4_coop_enter_second();
@@ -466,6 +473,8 @@ static int solid_player_contact_canonical(CPUState *cpu, uint32_t address) {
 }
 
 static int solid_player_contact(CPUState *cpu,uint32_t address) {
+    if(mmx4_coop_web_busy())return 0;
+    if(mmx4_coop_web_contact(cpu,address))return 1;
     return mmx4_coop_combat_canonical_call(cpu,address,solid_player_contact_canonical);
 }
 
@@ -583,6 +592,7 @@ static int survivor_actor_pool(CPUState *cpu,uint32_t address) {
 void mmx4_coop_combat_reset(void) {
     /* P2 enrollment invokes the native initializer within a projection. */
     if (mmx4_coop_projected()) return;
+    mmx4_coop_web_reset();
     memset(solids,0,sizeof solids);
     memset(second_effect_owner,0,sizeof second_effect_owner);
     memset(secondary_owner,0,sizeof secondary_owner);
@@ -610,6 +620,7 @@ static uint32_t digest_word(uint32_t seed, uint32_t value) {
 }
 
 uint32_t mmx4_coop_combat_digest(uint32_t seed) {
+    seed=mmx4_coop_web_digest(seed);
     seed=digest_word(seed,solid_count);
     for (unsigned i=0;i<solid_count;++i) {
         seed=digest_word(seed,solids[i].actor);
@@ -654,10 +665,14 @@ PSX_MOD_CONSTRUCTOR(mmx4_register_coop_combat) {
     psx_mod_register_function_filter_plugin(COOP_ID,SOLID_CONTACT,solid_player_contact);
     psx_mod_register_function_filter_plugin(COOP_ID,0x8002AB74u,allocate_actor);
     psx_mod_register_function_filter_plugin(COOP_ID,0x8002ACA4u,allocate_actor);
+    psx_mod_register_function_filter_plugin(COOP_ID,0x8002AC0Cu,allocate_actor);
     psx_mod_register_function_filter_plugin(COOP_ID,0x8002ADBCu,allocate_actor);
     psx_mod_register_function_filter_plugin(COOP_ID,EFFECT_ALLOCATE,allocate_effect);
+    psx_mod_register_function_filter_plugin(COOP_ID,0x800AEAC0u,personal_effect);
+    psx_mod_register_function_filter_plugin(COOP_ID,0x800AED18u,personal_effect);
     psx_mod_register_function_filter_plugin(COOP_ID,0x800AF22Cu,personal_effect);
     psx_mod_register_function_filter_plugin(COOP_ID,0x800AEED8u,personal_effect);
+    psx_mod_register_function_filter_plugin(COOP_ID,0x800B2A3Cu,personal_effect);
     psx_mod_register_function_filter_plugin(COOP_ID,PARTICLE_ALLOCATE,allocate_particle);
     psx_mod_register_function_filter_plugin(COOP_ID,PARTICLE_INITIALIZE,initialize_character_particle);
     psx_mod_register_function_filter_plugin(COOP_ID,0x8009485Cu,initialize_character_particle);

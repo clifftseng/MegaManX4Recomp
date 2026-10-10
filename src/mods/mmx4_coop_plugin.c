@@ -281,6 +281,23 @@ static void diagnostics(void) {
 #ifndef PSX_NO_DEBUG_TOOLS
     for(unsigned i=0;i<16;++i)project(diagnostic+0x480+i*8,second.shots+i*0x9C,8);
     project(diagnostic+0x500,second.trails,sizeof second.trails);
+    if(!projected) {
+        /* One completed Lightning Web is enough for native partner-contact
+         * inspection; do not expose or mutate the complete private pool. */
+        uint32_t slot=UINT32_MAX;
+        for(unsigned i=0;i<16;++i) {
+            const uint8_t *shot=second.shots+i*0x9C;
+            if(shot[0] && shot[1]==1 && shot[0x75] && le32(shot+0x68)==0x80108800u) {
+                slot=i;break;
+            }
+        }
+        psx_mod_write_word(diagnostic+0x6F0,0x57454231u);
+        psx_mod_write_word(diagnostic+0x6F4,slot);
+        psx_mod_write_word(diagnostic+0x6F8,frames);
+        psx_mod_write_word(diagnostic+0x6FC,0);
+        if(slot!=UINT32_MAX)project(diagnostic+0x700,second.shots+slot*0x9C,0x9C);
+        else for(unsigned i=0;i<0x9C;++i)psx_mod_write_byte(diagnostic+0x700+i,0);
+    }
     if(projected)project(diagnostic+0x620,first.vehicle,sizeof first.vehicle);
     else {
         uint8_t vehicle[0xB0];capture(MMX4_VEHICLE,vehicle,sizeof vehicle);
@@ -325,25 +342,28 @@ static int enroll(CPUState *cpu) {
     if(!load_stage_palette(counterpart))return 0;
     capture(PLAY,play,sizeof play);
     uint32_t x=psx_mod_read_word(PLAYER+8),y=psx_mod_read_word(PLAYER+12);
-    unsigned stage=psx_mod_read_byte(PLAY+0xC);
     unsigned on_chaser=psx_mod_read_byte(PLAYER+0xC5)==0xFF;
+    unsigned incoming=psx_mod_read_byte(PLAY+0x1C)==1;
     /* Native player initialization disables the shared camera at 8003558C.
-     * P1 already completed its spawn; P2 must not disable that camera again. */
+     * Keep P1's actual camera state during either concurrent or late arrival. */
     uint8_t camera_enabled[3]={psx_mod_read_byte(0x801419F4u),
         psx_mod_read_byte(0x80141A48u),psx_mod_read_byte(0x80141A9Cu)};
-    uint32_t spawn_x=x+((stage==0 || stage==5)?24u<<16:0);
+    uint32_t spawn_x=x+(24u<<16);
     enter_second();psx_mod_write_byte(PLAY+0x43,(uint8_t)counterpart);
     psx_mod_write_byte(PLAY+0x1E,0);
     guest(cpu,0x80035240,0,0);
     psx_mod_write_word(PLAYER+8,spawn_x);psx_mod_write_word(PLAYER+12,y);
     psx_mod_write_byte(PLAYER+3,1);psx_mod_write_byte(PLAYER+4,1);psx_mod_write_byte(PLAYER+5,2);
-    guest(cpu,0x800350A4,PLAYER,0);guest(cpu,0x80035EA4,PLAYER,0);
+    guest(cpu,0x800350A4,PLAYER,0);
+    if(!incoming)guest(cpu,0x80035EA4,PLAYER,0);
     psx_mod_write_word(PLAYER+0x18,spawn_x);psx_mod_write_word(PLAYER+0x1C,y);
     mmx4_coop_spawn_facing_right();
     if(on_chaser) {
         guest(cpu,0x80035A24,PLAYER,0);guest(cpu,0x80021C14,0,0);
     }
-    guest(cpu,0x8002C614,PLAYER,0);
+    /* An authored incoming position can be inside the stage's ceiling.
+     * Its native delay/beam clears that before installing a normal box. */
+    if(!incoming)guest(cpu,0x8002C614,PLAYER,0);
     mmx4_coop_spawn_facing_right();
     leave_second();project(PLAY,play,sizeof play);
     psx_mod_write_byte(0x801419F4u,camera_enabled[0]);
@@ -357,7 +377,7 @@ static void second_tick(CPUState *cpu,uint32_t address) {
     if(failed) {diagnostics();return;}
     if(inside || projected || psx_mod_read_byte(PLAY)!=6 || psx_mod_read_byte(PLAY+1)==2)return;
     inside=1;
-    if(!enrolled && psx_mod_read_byte(PLAYER+4)==1 && !psx_mod_read_byte(PLAY+0x1C)) {
+    if(!enrolled && mmx4_coop_lifecycle_can_enroll()) {
         if(!enroll(cpu))failed=1;
     }
     if(enrolled && !failed)mmx4_coop_lifecycle_tick(cpu);
@@ -946,7 +966,7 @@ static void activate(void) {
     mmx4_coop_audio_reset();
     bank_count=ui_bank_count=inside=enrolled=failed=rendering=projected=camera_call=camera_update_call=hud_call=upload_guard=0;
     view_bank_count=view_ui_bank_count=local_view_call=local_view_seat=0;
-    if(!mmx4_coop_split_activate())failed=1;
+    if(!mmx4_coop_split_activate() || !mmx4_coop_web_activate())failed=1;
     frames=fixture_sequence=fixture_invulnerable=previous_input=0;counterpart=0;menu_texture_owner=2;
 #ifdef MMX4_COOP_NETPLAY_DEBUG
     memset(&development_decoder,0,sizeof development_decoder);

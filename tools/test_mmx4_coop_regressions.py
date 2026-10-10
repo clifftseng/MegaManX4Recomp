@@ -422,7 +422,10 @@ class Scenarios:
         self.cyber()
         self.wait('weakness-cyber-fight-live',lambda s:not s['blocked'] and not s['warning'] and
             any(e['type']==64 and e['hp']>1 for e in self.enemies()),20,True)
-        self.r.fixture(7,1,4 if self.campaign else 0,1)
+        # Cyber's native update8007D838 enters reaction phase5 for attack
+        # types3/35/63 (returns4/36/64). X uses Soul Body, Zero Ryuuenjin.
+        # Enemy+63 == -1 denotes immunity/shot consumption, not a weakness.
+        self.r.fixture(7,1,3 if self.campaign else 0,1)
         boss=next(e for e in self.enemies() if e['type']==64 and e['hp']>1)
         before=boss['hp'];rows=[]
         for attempt in range(10):
@@ -430,18 +433,103 @@ class Scenarios:
             if target is None:break
             # Enter from the observed floor, then the native fire technique
             # reaches the boss vertically. P1 stays outside attack range.
-            self.r.teleport(1,int(target['x']),2507)
+            # The boss can hover left of the safe floor behind the doorway.
+            # A setup teleport there crushes the body against the closed gate.
+            x=max(1040,min(1240,int(target['x'])))
+            self.r.teleport(1,x,2507)
+            self.r.input(0xff7f if target['x']<x else 0xffdf,1)
+            time.sleep(.015);self.r.release()
             self.r.input(0x7fff if self.campaign else 0xefef,1);time.sleep(.12);self.r.release()
             for frame in range(10):
                 row=self.sample('p2-fire-weakness-%d-%d'%(attempt,frame),frame%3==0)
                 row['bosses']=[e for e in self.enemies() if e['type']==64]
+                shots=self.r.read(self.r.diagnostic()+0x480,16*8)
+                row['shot_types']=[shots[i*8+1] for i in range(16) if shots[i*8]]
                 rows.append(row);time.sleep(.025)
-            if any(e['reaction']==255 for r in rows for e in r['bosses']):break
+            if any(e['state'][1]==5 for r in rows for e in r['bosses']):break
         (self.output/'fire-weakness.json').write_text(json.dumps(rows,indent=2),encoding='utf-8')
         damage=min((e['hp'] for r in rows for e in r['bosses']),default=before)
         assert damage<before,('P2 fire did no damage',before,damage)
-        assert any(e['reaction']==255 for r in rows for e in r['bosses']),('No native weakness reaction',before,damage)
+        assert any(e['state'][1]==5 for r in rows for e in r['bosses']),('No native weakness reaction',before,damage)
         return dict(before_hp=before,after_hp=damage,native_weakness_reaction=True,campaign=self.campaign)
+
+    def initial_arrivals(self):
+        from mmx4_arrival_probe import Probe
+        output=self.output/'initial-arrivals';output.mkdir()
+        probe=Probe(self.r,output,self.campaign,True)
+        error=None
+        try:
+            for stage,section in ((1,0),(6,0),(6,1)):
+                probe.initial(stage,section,'first')
+            return dict(concurrent_native_arrivals=[{k:c[k] for k in
+                ('stage','section','concurrent_counter_delta','concurrent_beams_observed',
+                 'initial_gap_pixels','native_dash_observed','dash_during_partner_beam')}
+                for c in probe.cases],horizontal_gap=24)
+        except Exception as exc:
+            error=str(exc);raise
+        finally:probe.report(error)
+
+    def web_walljump(self):
+        from mmx4_web_probe import Probe
+        output=self.output/'web-walljump';output.mkdir()
+        probe=Probe(self.r,output,self.campaign)
+        try:
+            probe.walljump('left')
+            return dict(native_zero_web_walljump=True,campaign=self.campaign,cases=len(probe.cases))
+        finally:
+            self.r.release()
+            (output/'stage-interactions.json').write_text(json.dumps(
+                dict(cases=probe.cases,events=probe.events),indent=2),encoding='utf-8')
+
+    def stationary_arrivals(self):
+        from mmx4_arrival_probe import Probe
+        output=self.output/'stationary-arrivals';output.mkdir()
+        probe=Probe(self.r,output,self.campaign,True)
+        error=None
+        try:
+            for stage,section in ((1,0),(6,0),(6,1)):
+                probe.initial(stage,section,exercise_movement=False)
+            return dict(native_concurrent_arrivals=True,scenes=3,horizontal_gap=24,
+                        standing_both=True,campaign=self.campaign)
+        except Exception as exc:
+            error=str(exc);raise
+        finally:probe.report(error)
+
+    def intro_arrivals(self):
+        from mmx4_arrival_probe import Probe
+        output=self.output/'intro-arrivals';output.mkdir()
+        probe=Probe(self.r,output,self.campaign,True)
+        error=None
+        self.r.fixture(5,3)
+        try:
+            for seat in (1,0):probe.intro(seat)
+            return dict(native_p2_intro_entry=True,campaign=self.campaign,
+                        dash_seats=[dict(seat=c['dash_seat'],
+                            arrival_overlap=c['native_dash_during_partner_beam'],
+                            post_arrival_dash=c['post_arrival_native_dash'],
+                            timings=c['timings']) for c in probe.cases])
+        except Exception as exc:
+            error=str(exc);raise
+        finally:
+            self.r.fixture(5,0)
+            probe.report(error)
+
+    def train_background(self):
+        from mmx4_web_probe import Probe
+        output=self.output/'train-background';output.mkdir()
+        probe=Probe(self.r,output,self.campaign)
+        try:
+            for owner in (1,0):probe.train_background(owner,2)
+            return dict(native_split_train_background=True,owners=2)
+        finally:
+            self.r.release();self.r.fixture(5,0)
+            (output/'stage-interactions.json').write_text(json.dumps(
+                dict(cases=probe.cases,events=probe.events),indent=2),encoding='utf-8')
+
+    def dialogue_native(self):
+        from mmx4_dialogue_probe import slash_dialogue
+        result=slash_dialogue(self)
+        return dict(campaign=self.campaign,native_blue_dialogue=True,owners=len(result['cases']))
 
     def volcano_probe(self):
         self.load(4,1,3)
@@ -1082,6 +1170,8 @@ class Scenarios:
             count=lambda name:sum(c['count'] for c in counters if c['name']==name)
             before_departures=count('mmx4.coop.script-departures')
             before_arrivals=count('mmx4.coop.script-arrivals')
+            before_pairs=count('mmx4.coop.concurrent-return-arrivals')
+            pair_beam=None
             # Native-burn-40's bounded hub traversal established these safe
             # platforms:565/955 and659/923 (Zero's feet are one pixel higher).
             # Use those observed coordinates and let only the designated
@@ -1099,6 +1189,10 @@ class Scenarios:
                 row=self.sample('cyber-course-handoff')
                 counters=self.r.request('mod_counters')['counters']
                 if row['section']!=0 or row['checkpoint']!=checkpoint:transitioned=True
+                if transitioned and row['mode'][:2]==[6,0] and pair_beam is None and all(
+                    p['active'] and p['visible'] and p['state']==1 and p['action']==0
+                    for p in row['players']):
+                    pair_beam=self.sample('cyber-paired-return-'+str(checkpoint),True)
                 if not transitioned:
                     assert count('mmx4.coop.script-arrivals')==before_arrivals,(
                         'Passenger returned before native course changed',row)
@@ -1111,8 +1205,12 @@ class Scenarios:
             assert row['section']==(1 if checkpoint==5 else 0),row
             assert row['checkpoint']==(0 if checkpoint==5 else 2),row
             self.sample('cyber-hub-'+str(checkpoint)+'-complete',True)
+            pairs=count('mmx4.coop.concurrent-return-arrivals')-before_pairs
+            if checkpoint==1:
+                assert pairs>0 and pair_beam,('Native direct return did not arrive together',pairs,row)
             cases.append(dict(checkpoint=checkpoint,owner=owner,after=row,
-                              passenger_arrivals=count('mmx4.coop.script-arrivals')-before_arrivals))
+                              passenger_arrivals=count('mmx4.coop.script-arrivals')-before_arrivals,
+                              concurrent_return_arrivals=pairs,pair_beam=pair_beam))
         return dict(native_assessment_handoffs=cases)
 
     def spider_hole(self):
@@ -1375,7 +1473,8 @@ def main():
     parser.add_argument('--clears',type=lambda p:int(p,0),default=16,help='Expected boss bits on cold native card load')
     parser.add_argument('--hold-on-failure',type=int,default=0,
                         help='Keep only this owned hidden process alive for bounded TCP investigation')
-    parser.add_argument('--cases', nargs='+', choices=('jet','bike_probe', 'cyber','handoff_dash','section_health','dash_effects','zero_elemental','fire_weakness','cyber_flip_probe','cyber_flip','storm_warp', 'intro','intro_entry','trail_probe','post_victory_trails','open_airdash','train_visual','door_death','train_return','train_deaths','train_boss','arrival_death','combat','jet_boss',
+    parser.add_argument('--cameras',choices=('unified','split'),default='unified')
+    parser.add_argument('--cases', nargs='+', choices=('jet','bike_probe', 'cyber','handoff_dash','section_health','dash_effects','zero_elemental','fire_weakness','initial_arrivals','stationary_arrivals','intro_arrivals','web_walljump','train_background','dialogue_native','cyber_flip_probe','cyber_flip','storm_warp', 'intro','intro_entry','trail_probe','post_victory_trails','open_airdash','train_visual','door_death','train_return','train_deaths','train_boss','arrival_death','combat','jet_boss',
                         'spider_visual','cyber_missiles','spider_hole','victory','diagnostics','audio',
                         'cyber_orb','cyber_course','cyber_moving','volcano_probe','volcano_entry','save_loop','second_save_loop','stage_reentry','portrait_exit','portrait_escape','reload_save','enemy_activation'), default=['jet', 'cyber', 'intro'])
     args = parser.parse_args()
@@ -1394,7 +1493,7 @@ def main():
         shutil.copy2(dll, args.output / dll.name)
     (args.output / 'mods/state.toml').write_text('format_version = 2\n\n[[feature]]\n'
         'package_id = "mmx4.coop"\nid = "coop"\nenabled = true\n'
-        '[feature.values]\ncameras = "unified"\n\n[[feature]]\n'
+        '[feature.values]\ncameras = "'+args.cameras+'"\n\n[[feature]]\n'
         'package_id = "mmx4.enhancement.widescreen"\nid = "widescreen"\nenabled = false\n')
     config = args.game.read_text(encoding="utf-8").replace('exe = "mmx4/SLUS_005.61"',
         'exe = ' + json.dumps((args.game.parent / 'mmx4/SLUS_005.61').as_posix()))
