@@ -36,6 +36,8 @@ class Scenarios:
         row['checkpoint']=shared[0x1d]
         row['blocked']=self.r.read(0x801721dc,1)[0]
         mirror=self.r.read(self.r.diagnostic(),0x6d0)
+        row['plugin_failed']=struct.unpack_from('<I',mirror,12)[0]
+        assert not row['plugin_failed'],('Co-op renderer disabled',row)
         row['native_health']=[list(mirror[at+0x5c:at+0x5f]) for at in (0x300,0x100)]
         row['vehicle_health']=[mirror[at+0x5c] for at in (0x620,0x200)]
         row['campaign_health']=mirror[0x445]
@@ -45,6 +47,7 @@ class Scenarios:
         row['personal_locks']=[[mirror[at+j] for j in (0x67,0xbc,0xc0,0xc3,0xc4)]
                                for at in (0x300,0x100)]
         row['orb_capture']=[mirror[at+0xba] for at in (0x300,0x100)]
+        row['camera_clip']=list(struct.unpack('<6h',self.r.read(0x801419cc,12)))
         row['bounds']=list(struct.unpack('<4h',self.r.read(0x801419d4,8)))
         if self.watch_enemy is not None:
             row['enemies']=[p for p in self.enemies() if p['type']==self.watch_enemy]
@@ -278,6 +281,137 @@ class Scenarios:
                   all(not p['door'] and not p['script'] and p['hp'] > 0 for p in s['players']), 30, True)
         return dict(p2_first_approach=True, native_arena_script_released=True,
                     note='Scripted arena approach; not a separate C4 door qualification')
+
+    def intro_entry(self):
+        self.load(0,1,2)
+        # Native gate is ahead of4200.4000 stopped P2 at the shared spacing
+        # limit before reaching it, so it did not exercise boss entry.
+        self.r.teleport(0,4200,443)
+        self.watch_enemy=8
+        before=self.sample('intro-native-checkpoint-before-entry',True)
+        assert not before['blocked'] and not any(p['script'] for p in before['players']),before
+        deadline=time.monotonic()+45
+        try:
+            while time.monotonic()<deadline:
+                row=self.sample('intro-native-p2-traversal')
+                if any(e['type']==8 and e['hp']>1 for e in self.enemies()):break
+                # Zero campaign has a Mac conversation before the dragon.
+                # Complete that native scene, then continue P2's approach.
+                if row['blocked']:
+                    self.r.input(0xbfff,0);self.r.input(0xbfff,1)
+                    time.sleep(.03);self.r.release()
+                else:
+                    # Mac's script returns Zero to4112. Restore the safe
+                    # pre-dragon fixture after that completed encounter so
+                    # the240px shared spacing limit permits P2-only entry.
+                    if self.campaign==1 and row['players'][0]['x']<4200 and \
+                       row['players'][0]['action']==2 and not row['players'][0]['script']:
+                        self.r.teleport(0,4200,442)
+                    self.r.input(0xffdf,1)
+                time.sleep(.02)
+            else:raise TimeoutError('P2 native intro traversal did not reach dragon')
+        finally:self.r.release()
+        self.sample('intro-native-entry-state',True)
+        self.wait('intro-native-dragon-ready',lambda s:not s['blocked'] and not s['warning'] and
+                  any(e['type']==8 and e['hp']>1 for e in self.enemies()) and
+                  all(p['active'] and p['visible'] and p['hp']>0 and p['state']==1 and
+                      p['action']==2 and not p['door'] and not p['script']
+                      for p in s['players']),25,True)
+        self.sample('intro-native-dragon-fight',True)
+        return dict(native_p2_controller_traversal=True,both_in_dragon_fight=True,
+                    p2_owns_scene=any(x['players'][1]['script'] for x in self.events
+                                     if x['label']=='intro-native-p2-traversal'))
+
+    def trail_probe(self):
+        self.load(1,0)
+        def dash(label):
+            self.r.input(0xdfdf,1)
+            peak=0
+            try:
+                for i in range(20):
+                    b=self.r.read(self.r.diagnostic()+0x500,3*0x60)
+                    active=sum(bool(b[n*0x60] and b[n*0x60+3]) for n in range(3))
+                    if active>peak:
+                        peak=active;self.sample(label+'-'+str(i),True)
+                    time.sleep(.008)
+            finally:self.r.release()
+            return dict(visible_peak=peak,actors=b.hex())
+        diag=self.r.diagnostic()
+        first_palette=struct.unpack('<I',self.r.read(0x1f800028,4))[0]
+        private_base=diag-0xc0000+(self.campaign^1)*0x60000
+        body=self.r.read(diag+0x100,0xe4)
+        assert private_base<=struct.unpack_from('<I',body,0x38)[0]<private_base+0x34000
+        palettes=[self.r.read(a+0x1a0,96).hex() for a in (first_palette,private_base+0x41000)]
+        color=struct.unpack_from('<H',bytes.fromhex(palettes[1]),2)[0]
+        red,blue=color&31,(color>>10)&31
+        correct_color=red>blue if self.campaign==0 else blue>red
+        before=dash('trail-before-warp')
+        (self.output/'trail-before.json').write_text(json.dumps(dict(palettes=palettes,before=before),indent=2))
+        assert before['visible_peak']>0,before
+        self.wait('trail-before-withdraw',lambda s:s['players'][1]['action']==2 and
+                  s['players'][1]['grounded'],5)
+        self.r.input(0xfffe,1)
+        try:self.wait('trail-withdrawn',lambda s:not s['players'][1]['active'],6)
+        finally:self.r.release()
+        time.sleep(.1)
+        self.r.input(0xfffe,1);time.sleep(.08);self.r.release()
+        self.wait('trail-returned',lambda s:s['players'][1]['active'] and
+                  s['players'][1]['action']==2 and s['players'][1]['grounded'],8)
+        after=dash('trail-after-warp')
+        (self.output/'trail-probe.json').write_text(json.dumps(dict(
+            palettes=palettes,before=before,after=after),indent=2))
+        assert after['visible_peak']>0,('Native trails lost after warp',after)
+        assert correct_color,('P2 native dash color belongs to other character',palettes)
+        return dict(before=before['visible_peak'],after=after['visible_peak'],palettes=palettes)
+
+    def train_visual(self):
+        self.load(8,0)
+        self.r.fixture(5,0)
+        self.r.write(0x801418c8+0x61,0)
+        # Jet Stingray's native campaign bit gives Zero the air dash.
+        clears=self.r.read(0x801721c0+0x59,1)[0]
+        self.r.write(0x801721c0+0x59,clears|16)
+        time.sleep(.2)
+        self.sample('train-airdash-before',True)
+        captures=[]
+        for cycle in range(3):
+            self.r.input(0xbfdf,1);time.sleep(.08)
+            self.r.release();time.sleep(.02)
+            self.r.input(0xdfdf,1)
+            try:
+                for i in range(8):
+                    captures.append(self.sample('train-airdash-%d-%d'%(cycle,i),True))
+                    time.sleep(.008)
+            finally:self.r.release()
+            time.sleep(.2)
+        self.sample('train-airdash-after',True)
+        uploads=self.r.request('a0_history')
+        (self.output/'train-airdash-uploads.json').write_text(json.dumps(uploads,indent=2))
+        counters=self.r.request('mod_counters')['counters']
+        return dict(airdash_actions=list(dict.fromkeys(s['players'][1]['action'] for s in captures)),
+                    uploads=uploads['count'],primary_private_draws=sum(c['count'] for c in counters
+                     if c['name']=='mmx4.coop.primary-private-character-draws'))
+
+    def door_death(self):
+        cases=[]
+        for owner in (1,0):
+            self.load(6,1,1)
+            self.r.teleport_both(568,2507)
+            self.r.teleport(owner,600,2507)
+            self.r.input(0xffdf,owner)
+            try:self.wait('door-death-entered-'+str(owner),lambda s:s['players'][owner]['door'],8)
+            finally:self.r.release()
+            self.r.request('wtrace_range',lo='0x141924',hi='0x141925')
+            self.r.fixture(2,owner,0x80)
+            self.sample('door-death-fatal-'+str(owner),True)
+            row=self.wait('door-death-survivor-released-'+str(owner),lambda s:
+                s['players'][owner]['hp']==0 and s['players'][owner^1]['active'] and
+                s['players'][owner^1]['visible'] and s['players'][owner^1]['action']==2 and
+                not s['blocked'] and not any(p['door'] or p['script'] for p in s['players']),15,True)
+            self.sample('door-death-survivor-safe-'+str(owner),True)
+            assert row['players'][owner^1]['hp']>0,row
+            cases.append(dict(owner=owner,players=row['players']))
+        return dict(native_death_during_door=cases)
 
     def combat(self):
         self.intro()
@@ -731,7 +865,7 @@ def main():
     parser.add_argument('--victory-seat',type=int,choices=(0,1),default=1)
     parser.add_argument('--card-seed',type=Path,help='Private native cards to clone and Continue from data1')
     parser.add_argument('--clears',type=lambda p:int(p,0),default=16,help='Expected boss bits on cold native card load')
-    parser.add_argument('--cases', nargs='+', choices=('jet', 'cyber', 'intro','combat','jet_boss',
+    parser.add_argument('--cases', nargs='+', choices=('jet', 'cyber', 'intro','intro_entry','trail_probe','train_visual','door_death','combat','jet_boss',
                         'spider_visual','cyber_missiles','spider_hole','victory','diagnostics','audio',
                         'cyber_orb','cyber_course','cyber_moving','volcano_probe','volcano_entry','save_loop','second_save_loop','stage_reentry','reload_save','enemy_activation'), default=['jet', 'cyber', 'intro'])
     args = parser.parse_args()
@@ -752,10 +886,10 @@ def main():
         'package_id = "mmx4.coop"\nid = "coop"\nenabled = true\n'
         '[feature.values]\ncameras = "unified"\n\n[[feature]]\n'
         'package_id = "mmx4.enhancement.widescreen"\nid = "widescreen"\nenabled = false\n')
-    config = args.game.read_text().replace('exe = "mmx4/SLUS_005.61"',
+    config = args.game.read_text(encoding="utf-8").replace('exe = "mmx4/SLUS_005.61"',
         'exe = ' + json.dumps((args.game.parent / 'mmx4/SLUS_005.61').as_posix()))
     config = config.replace('internal_resolution = "1080p"', 'internal_resolution = "native"')
-    (args.output / 'game.toml').write_text(config)
+    (args.output / 'game.toml').write_text(config,encoding='utf-8',newline='\n')
     env = {key: value for key, value in os.environ.items()
            if not key.upper().startswith(('PSX_', 'RNET_', 'MMX4_DIAGNOSTIC_'))}
     env['PATH'] = r'C:\msys64\mingw64\bin;' + env.get('PATH', '')
@@ -794,6 +928,8 @@ def main():
             print(report['error'], flush=True)
             try:
                 scenarios.sample('failure', True)
+                (args.output/'failure-enemies.json').write_text(json.dumps(scenarios.enemies(),indent=2))
+                (args.output/'failure-writes.json').write_text(json.dumps(runtime.request('wtrace_dump',count=4096),indent=2))
             except Exception:
                 pass
             raise

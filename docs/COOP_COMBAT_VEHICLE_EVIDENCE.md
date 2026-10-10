@@ -374,3 +374,35 @@ dies or rejoins elsewhere. Allocation reuse and stage reset clear ownership;
 pending origins participate in the co-op digest. Boundary tests cover both
 characters, distant P1, dead/repositioned P2 and reuse. Native color/origin
 confirmation remains with the owner.
+
+
+## Native dash trails and counterpart palette (2026-10-10)
+
+Native 80035240 seeds three 60-byte trails at80141AB0, with compressed
+body/assembly pointers, predecessor links at+50 and CLUTs780D/780E/780F
+(from800F8B3C). Clearing their whole structures during a transport disables
+future images. Cancel only+3 visibility and+4 update state; preserve the
+initializer's resource fields. qa-trails-baseline-23 has no native images
+after a shared room handoff; qa-trails-fixed-24 has three both before and
+after withdrawal and native arrival.
+
+COLxx_0X/0Z and COLxx_1X/1Z contain one type5 member,4096 bytes: the stage
+palette. X's trail slots have blue colors D103/BCA0/B040; Zero's are red
+8032/800E/8009. Counterpart enrollment now loads its own original COL
+palette out of band, then native player initialization applies its dynamic
+body colors. Copying P1's palette left the trail slots with the wrong
+character colors. qa-trail-colors-zero-26 and qa-trail-colors-x-27 verify
+both seat arrangements, private palettes and three visible native trails
+before and after withdrawal/rejoin. Original-disc bytes remain runtime
+inputs; no game asset is committed.
+
+
+Both characters' own body/shot/trail draw packets now use retained immutable
+textures. Primary native compressed-table offsets are mapped to the original
+retained PL archive, and its colors come from the current canonical palette.
+This avoids a full palette copy per frame. Counterpart colors use its private
+COL palette. Native common actors and vehicle-stage graphics retain their
+original rendering. qa-private-primary-render-31 passes train jump/dash
+frames, both Web Spider water pairs and three trails, P2-owned intro entry,
+and Cyber outer/inner arrivals. The exact helmet-only air-dash report remains
+item14 until the open-space airborne fixture is qualified.
