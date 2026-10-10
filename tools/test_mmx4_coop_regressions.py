@@ -185,6 +185,36 @@ class Scenarios:
         self.door(1, 'cyber-p2-inner')
         return dict(outer=True, inner=True, passenger_alive=True)
 
+    def cyber_moving(self):
+        cases=[]
+        for owner in (1,0):
+            self.load(6,1,1)
+            self.r.teleport_both(568,2507)
+            self.r.teleport(owner,600,2507)
+            self.r.input(0xffdf,owner)
+            try:
+                self.wait('cyber-moving-entered-'+str(owner),
+                          lambda s:s['players'][owner]['door']!=0,8)
+                self.wait('cyber-moving-door-finished-'+str(owner),
+                          lambda s:not s['players'][owner]['door'] and not s['blocked'],20,True)
+                deadline=time.monotonic()+4
+                sample=0
+                while time.monotonic()<deadline:
+                    # Keep walking inside the room while the partner arrives.
+                    self.r.input(0xffdf if sample%2 else 0xff7f,owner)
+                    time.sleep(.15)
+                    row=self.sample('cyber-moving-arrival-'+str(owner),sample%4==0)
+                    assert all(p['hp']>0 for p in row['players']),row
+                    if all(p['active'] and p['visible'] and p['state']==1 and
+                           not p['door'] and not p['script'] for p in row['players']) and \
+                       row['players'][owner^1]['action']==2:
+                        cases.append(dict(owner=owner,arrival=row))
+                        break
+                    sample+=1
+                else:raise AssertionError(('Partner did not arrive with moving leader',row))
+            finally:self.r.release()
+        return dict(moving_leaders=cases)
+
     def intro(self):
         self.load(0, 1, 2)
         self.r.teleport_both(4208, 443)
@@ -654,7 +684,7 @@ def main():
     parser.add_argument('--clears',type=lambda p:int(p,0),default=16,help='Expected boss bits on cold native card load')
     parser.add_argument('--cases', nargs='+', choices=('jet', 'cyber', 'intro','combat','jet_boss',
                         'spider_visual','cyber_missiles','spider_hole','victory','diagnostics','audio',
-                        'cyber_orb','cyber_course','save_loop','second_save_loop','stage_reentry','reload_save','enemy_activation'), default=['jet', 'cyber', 'intro'])
+                        'cyber_orb','cyber_course','cyber_moving','save_loop','second_save_loop','stage_reentry','reload_save','enemy_activation'), default=['jet', 'cyber', 'intro'])
     args = parser.parse_args()
     for name in ('exe', 'bios', 'disc', 'game', 'output'):
         setattr(args, name, getattr(args, name).resolve())

@@ -661,6 +661,23 @@ int main(void) {
         mmx4_coop_lifecycle_tick(&cpu);CHECK(!warp_phase && mmx4_coop_alive(1));
     }
 
+    /* A grounded walking leader releases the arrival for either seat.
+     * Native victory actions above remain gated through completion. */
+    for(unsigned owner=0;owner<2;++owner) {
+        reset();warp_owner=owner;warp_phase=1;warp_active=warp_visible=1;
+        if(owner) {
+            psx_mod_write_byte(PLAYER,0);psx_mod_write_byte(PLAYER+3,0);
+            p2[5]=4;p2[0x89]=8;
+        }else {
+            p2[0]=p2[3]=0;psx_mod_write_byte(PLAYER+5,4);
+            psx_mod_write_byte(PLAYER+0x89,8);
+        }
+        for(unsigned i=0;i<3;++i)mmx4_coop_lifecycle_tick(&cpu);
+        CHECK(warp_phase==2);
+        mmx4_coop_lifecycle_tick(&cpu);
+        CHECK(!warp_phase && mmx4_coop_alive(owner^1u));
+    }
+
     /* Marine Base prohibits withdrawal for the whole bike sequence, even
      * during frames where native mounting fields temporarily clear. */
     reset();inputs[1]=SELECT;psx_mod_write_byte(PLAYER+0xC5,0xFF);

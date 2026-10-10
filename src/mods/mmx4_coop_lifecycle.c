@@ -413,7 +413,10 @@ static void warp_tick(CPUState *cpu) {
                 warp_active,warp_visible,warp_vehicle_active,warp_vehicle_visible);
             warp_phase=0;return;
         }
-        if(locked || state!=1 || action!=2 || !(grounded&8u)) {warp_unlocked_ticks=0;return;}
+        /* Native walking/dashing has a different action from idle. A living
+         * grounded leader already supplies a safe landing point; requiring
+         * idle restarted the wait whenever that player kept moving. */
+        if(locked || state!=1 || action<2 || action>=0x10 || !(grounded&8u)) {warp_unlocked_ticks=0;return;}
         if(++warp_unlocked_ticks<3)return;
         position_return(cpu,seat,x,y,warp_active,warp_visible,
             warp_vehicle_active,warp_vehicle_visible);
@@ -503,7 +506,8 @@ void mmx4_coop_lifecycle_tick(CPUState *cpu) {
         if(rejoin_pending && mmx4_coop_alive(0) &&
            psx_mod_read_byte(PLAY)==6 && !psx_mod_read_byte(PLAY+1) &&
            !psx_mod_read_byte(PLAY+0x0F) && !psx_mod_read_byte(PLAY+0x10) &&
-           !psx_mod_read_byte(PLAY+0x1C) && psx_mod_read_byte(PLAYER+5)==2 &&
+           !psx_mod_read_byte(PLAY+0x1C) && psx_mod_read_byte(PLAYER+5)>=2 &&
+           psx_mod_read_byte(PLAYER+5)<0x10 &&
            !psx_mod_read_byte(PLAYER+0xC0) && !psx_mod_read_byte(PLAYER+0xC3) &&
            !psx_mod_read_byte(PLAYER+0xC4) && !psx_mod_read_byte(PLAYER+0x67) &&
            (psx_mod_read_byte(PLAYER+0x89)&8u) &&
