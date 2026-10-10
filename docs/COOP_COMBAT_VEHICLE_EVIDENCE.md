@@ -481,3 +481,35 @@ QA55 also performs P2-first Cyber outer entry followed immediately by either
 seat dashing during partner arrival:24 captures each, both arrive healthy,
 visible and unlocked. Further boss/event paths and timing qualification are
 tracked in items14/23.
+
+## Ride Chaser ownership and shared Cyber flips (2026-10-10)
+
+Secondary vehicle types56/57 defer updates through800AE3F4/800AE65C;
+800AE6B4 copies the singleton PLAYER coordinates. Remember the allocating
+seat before enrollment and select that seat for these actors, rather than
+nearest-player AI. Cleanup still advances after that rider dies; native slot
+reuse clears old ownership. Vehicle effects0C/0D/0F use the existing following
+source ownership. P2 rider/bike/exhaust packet priorities are offset4 during
+emission only, keeping each bundle together while restoring simulation fields.
+QA57/58 both-roster native bikes Dash with healthy draw captures; ownership
+tests include a nearer other rider, dead owner and slot reuse.
+
+Cyber General20 update800C4EC8 queries only PLAYER through the read-only
+8002BB80 collision test. Allow P2's query when P1 does not activate it.
+Native800C4F40 reflects PLAYER Y/previousY about2048, primary camera Y/targetY
+about1792, background cameras about2304, mirrors shared pools via800C5078,
+then togglesPLAY+26. Apply those same reflections once to the private partner
+body/active shots and saved Split cameras; keep any committed arrival anchor
+in the flipped room. No second shared-world update or script departure occurs.
+QA60's real P2/Zero switch flip and QA61's either-seat switches with X/P2
+finish both players visible/grounded/alive. Ownership tests verify one shared
+update, and two reflections preserve fractional body/camera coordinates exactly.
+All16 title CTests pass. Earlier probes at984/936 were transporters; teleporting
+into the switch's solid base at656/971 was unsafe. The qualified setup drops
+the activator from656/900, with ordinary native invulnerability expired.
+
+QA57 and QA58 manual additionally qualify P2-owned Cyber outer/inner doors,
+followed by each seat dashing through arrival:96 captures per roster, both
+healthy and unlocked. Uncapped hidden frame progression stays around113-131fps
+for idle/dashing windows; no severe slowdown is reproduced in those paths.
+Other equivalent events and netplay timing remain separate qualification.

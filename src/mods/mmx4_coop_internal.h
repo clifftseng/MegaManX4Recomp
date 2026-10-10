@@ -25,6 +25,8 @@ int mmx4_coop_split_scene_camera_begin(unsigned owner,uint8_t canonical[0xFC]);
 void mmx4_coop_split_scene_camera_end(unsigned owner,const uint8_t canonical[0xFC],int committed);
 void mmx4_coop_split_actors(Mmx4CoopViewActor actors[2]);
 int mmx4_coop_split_camera_copy(unsigned seat,uint8_t layers[0xFC]);
+void mmx4_coop_split_flip_cameras(void);
+void mmx4_coop_flip_second(void);
 unsigned mmx4_coop_split_view_seat(unsigned seat);
 void mmx4_coop_lifecycle_view_save(void);
 void mmx4_coop_lifecycle_view_restore(void);
@@ -42,6 +44,7 @@ int mmx4_coop_finish(CPUState *cpu,uint32_t result);
 uint16_t mmx4_coop_input(unsigned seat);
 void mmx4_coop_menu_assets(CPUState *cpu,unsigned seat);
 void mmx4_coop_combat_reset(void);
+unsigned mmx4_coop_vehicle_effect_owner(uint32_t actor);
 void mmx4_coop_combat_project_end(uint32_t vehicle_mirror);
 int mmx4_coop_combat_actor_context(void);
 int mmx4_coop_combat_canonical_call(CPUState *cpu,uint32_t address,

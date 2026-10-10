@@ -16,6 +16,9 @@
 #define EFFECT_POOL 0x8013E510u
 #define EFFECT_STRIDE 0x70u
 #define EFFECT_CAPACITY 32u
+#define SECONDARY_POOL 0x8013F328u
+#define SECONDARY_CAPACITY 32u
+#define SECONDARY_STRIDE 0x9Cu
 #define PARTICLE_ALLOCATE 0x8002AE50u
 #define PARTICLE_INITIALIZE 0x800CAE38u
 #define PARTICLE_POOL 0x80173CA0u
@@ -45,6 +48,9 @@ static unsigned combat_call, solid_call, allocation_call, aim_call;
 static unsigned effect_allocation_call;
 static unsigned personal_effect_call;
 static uint8_t second_effect_owner[EFFECT_CAPACITY];
+/* Ride Chaser types56/57 read PLAYER as well as their vehicle parent.
+ * Their allocating rider, not nearest-player AI, owns every later update. */
+static uint8_t secondary_owner[SECONDARY_CAPACITY];
 /* The type-11 death effect defers its character assembly and position reads
  * until the shared pool pass. Keep the allocation-time origin through rejoin. */
 static struct { uint32_t x,y; uint8_t owner,screen; } particles[PARTICLE_CAPACITY];
@@ -199,13 +205,31 @@ static int allocate_actor(CPUState *cpu, uint32_t address) {
     /* A private player pass can allocate shared effects/actors too. Unlike
      * collision hooks this wrapper never starts another projection, so it is
      * safe while projected and must invalidate reused slots in either seat. */
-    if (allocation_call || !mmx4_coop_ready() ||
+    if (allocation_call ||
         psx_mod_read_byte(MMX4_PLAY)!=6) return 0;
     allocation_call=1;
     uint32_t actor=mmx4_coop_call(cpu,address,cpu->gpr[4],cpu->gpr[5]);
     allocation_call=0;
     if (actor) {forget_solid(actor);forget_hit(actor);}
+    if(actor>=SECONDARY_POOL && actor<SECONDARY_POOL+SECONDARY_CAPACITY*SECONDARY_STRIDE &&
+       !((actor-SECONDARY_POOL)%SECONDARY_STRIDE))
+        secondary_owner[(actor-SECONDARY_POOL)/SECONDARY_STRIDE]=(uint8_t)(mmx4_coop_projected()+1);
     return mmx4_coop_finish(cpu,actor);
+}
+
+unsigned mmx4_coop_vehicle_effect_owner(uint32_t actor) {
+    if(actor>=EFFECT_POOL && actor<EFFECT_POOL+EFFECT_CAPACITY*EFFECT_STRIDE &&
+       !((actor-EFFECT_POOL)%EFFECT_STRIDE)) {
+        unsigned type=psx_mod_read_byte(actor+1);
+        if(type==0x0C || type==0x0D || type==0x0F)
+            return second_effect_owner[(actor-EFFECT_POOL)/EFFECT_STRIDE]?2u:
+                (psx_mod_read_word(actor+0x50)==MMX4_VEHICLE?1u:0u);
+        return 0;
+    }
+    if(actor<SECONDARY_POOL || actor>=SECONDARY_POOL+SECONDARY_CAPACITY*SECONDARY_STRIDE ||
+       (actor-SECONDARY_POOL)%SECONDARY_STRIDE)return 0;
+    unsigned type=psx_mod_read_byte(actor+1);
+    return type==56 || type==57?secondary_owner[(actor-SECONDARY_POOL)/SECONDARY_STRIDE]:0;
 }
 
 static int allocate_effect(CPUState *cpu, uint32_t address) {
@@ -512,10 +536,12 @@ static void update_actor(CPUState *cpu,uint32_t address) {
        psx_mod_read_byte(actor+1)==54 && psx_mod_read_byte(actor+4)==1 &&
        psx_mod_read_byte(actor+5)==9 && !psx_mod_read_byte(actor+6))
         target=!actors[0].active || (actors[1].active && actors[1].world_x>actors[0].world_x);
+    unsigned vehicle_owner=actor_pool==0x8002144Cu?mmx4_coop_vehicle_effect_owner(actor):0;
+    if(vehicle_owner)target=vehicle_owner-1;
     actor_owner=target;
     actor_campaign=psx_mod_read_byte(MMX4_PLAY+0x43);
     uint32_t result=0;
-    if(actors[target].active) {
+    if(actors[target].active || vehicle_owner) {
         if(target) {
             mmx4_coop_enter_second();
             psx_mod_write_byte(MMX4_PLAY+0x43,actor_campaign);
@@ -556,6 +582,7 @@ void mmx4_coop_combat_reset(void) {
     if (mmx4_coop_projected()) return;
     memset(solids,0,sizeof solids);
     memset(second_effect_owner,0,sizeof second_effect_owner);
+    memset(secondary_owner,0,sizeof secondary_owner);
     memset(particles,0,sizeof particles);
     particle_allocation_call=particle_init_call=0;
     memset(hits,0,sizeof hits);
@@ -590,6 +617,8 @@ uint32_t mmx4_coop_combat_digest(uint32_t seed) {
     }
     for (unsigned i=0;i<EFFECT_CAPACITY;++i)
         seed=digest_byte(seed,second_effect_owner[i]);
+    for(unsigned i=0;i<SECONDARY_CAPACITY;++i)
+        seed=digest_byte(seed,secondary_owner[i]);
     for(unsigned i=0;i<PARTICLE_CAPACITY;++i) {
         seed=digest_byte(seed,particles[i].owner);
         if(particles[i].owner) {

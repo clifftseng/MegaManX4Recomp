@@ -19,6 +19,7 @@ static unsigned stage_script_calls,scene_calls,observed_controls;
 static unsigned boundary_calls[2];
 static unsigned dialogue_calls,dialogue_edge;
 static unsigned dialogue_init_calls,dialogue_init_character,stage_script_projected;
+static unsigned flip_queries[2],flip_hits[2],flip_world_calls,flip_second_calls,flip_camera_calls;
 static uint8_t p2_solid_bits;
 static uint16_t inputs[2];
 typedef struct { uint32_t address;PSXModFunctionFilterCallback filter; } Filter;
@@ -61,6 +62,15 @@ uint8_t *mmx4_coop_second_body(void) {return p2;}
 uint8_t *mmx4_coop_second_vehicle(void) {return p2_vehicle;}
 uint8_t *mmx4_coop_first_vehicle(void) {return p1_vehicle_backup;}
 void mmx4_coop_clear_current_attacks(void) {}
+void mmx4_coop_split_flip_cameras(void) {++flip_camera_calls;}
+void mmx4_coop_flip_second(void) {
+    ++flip_second_calls;
+    for(unsigned at=12;at<=28;at+=16) {
+        uint32_t y=(uint32_t)p2[at]|(uint32_t)p2[at+1]<<8|(uint32_t)p2[at+2]<<16|(uint32_t)p2[at+3]<<24;
+        y=0x08000000u-y;
+        for(unsigned i=0;i<4;++i)p2[at+i]=(uint8_t)(y>>(i*8));
+    }
+}
 uint16_t mmx4_coop_input(unsigned seat) {return inputs[seat];}
 int mmx4_coop_finish(CPUState *cpu,uint32_t v) {cpu->gpr[2]=v;return 1;}
 int mmx4_coop_combat_canonical_call(CPUState *cpu,uint32_t address,
@@ -152,6 +162,15 @@ uint32_t mmx4_coop_call(CPUState *cpu,uint32_t address,uint32_t a0,uint32_t a1) 
         dialogue_init_character=psx_mod_read_byte(MMX4_PLAYER+2);
         observed_campaign=psx_mod_read_byte(MMX4_PLAY+0x43);
         psx_mod_write_byte(0x80166BB0u,(uint8_t)(psx_mod_read_byte(0x80166BB0u)|1u));
+        break;
+    case 0x800C4EC8:
+        ++flip_queries[projected];
+        if(flip_hits[projected])psx_mod_write_byte(a0+5,1);
+        break;
+    case 0x800C4F40:
+        ++flip_world_calls;
+        for(unsigned at=12;at<=28;at+=16)
+            psx_mod_write_word(MMX4_PLAYER+at,0x08000000u-psx_mod_read_word(MMX4_PLAYER+at));
         break;
     case 0x8002FCAC:
         observed_campaign=psx_mod_read_byte(MMX4_PLAY+0x43);
@@ -284,6 +303,25 @@ static void reset(void) {
 }
 int main(void) {
     CPUState cpu={0};reset();
+    for(unsigned owner=0;owner<2;++owner) {
+        reset();memset(flip_queries,0,sizeof flip_queries);memset(flip_hits,0,sizeof flip_hits);
+        flip_world_calls=flip_second_calls=flip_camera_calls=0;
+        psx_mod_write_byte(PLAY+0x0C,6);psx_mod_write_byte(PLAY+0x0D,1);
+        const uint32_t actor=0x80165A30u;flip_hits[owner]=1;
+        mmx4_coop_call(&cpu,0x800C4EC8u,actor,0);
+        CHECK(psx_mod_read_byte(actor+5)==1 && flip_queries[0]==1 && flip_queries[1]==owner);
+        CHECK(!projected && psx_mod_read_byte(PLAYER+0x5C)==16 && p2[0x5C]==12);
+        psx_mod_write_word(PLAYER+12,971u<<16);psx_mod_write_word(PLAYER+28,(970u<<16)+123);
+        p2[14]=0xCA;p2[15]=3; /* Y970. */
+        uint8_t original[4];memcpy(original,p2+12,4);
+        mmx4_coop_call(&cpu,0x800C4F40u,actor,0);
+        CHECK(flip_world_calls==1 && flip_second_calls==1 && flip_camera_calls==1);
+        CHECK(psx_mod_read_word(PLAYER+12)==1077u<<16 && body_word(p2,12)==1078u<<16);
+        mmx4_coop_call(&cpu,0x800C4F40u,actor,0);
+        CHECK(psx_mod_read_word(PLAYER+12)==971u<<16 && !memcmp(original,p2+12,4));
+        CHECK(flip_world_calls==2 && flip_second_calls==2 && !projected);
+    }
+    reset();
     Inventory original_second=second_inventory,original_saved=saved_inventory;
     uint32_t inventory_digest=mmx4_coop_lifecycle_digest(2166136261u);
     mmx4_coop_lifecycle_view_save();

@@ -225,28 +225,78 @@ class Scenarios:
         for dash_seat in (1,0):
             self.load(6,1,1)
             self.r.teleport_both(568,2507);self.r.teleport(1,600,2507)
-            self.r.input(0xffdf,1)
-            try:
-                self.wait('handoff-dash-entered-'+str(dash_seat),lambda s:s['players'][1]['door'],8)
-                self.wait('handoff-dash-released-'+str(dash_seat),lambda s:
-                    not s['players'][1]['door'] and not s['blocked'],20,True)
-            finally:self.r.release()
             frames=[]
-            for frame in range(24):
-                # Dash throughout the passenger arrival, alternating direction
-                # inside the small native boss antechamber.
-                direction=0xffdf if frame%8<4 else 0xff7f
-                self.r.input(direction & 0xdfff,dash_seat);time.sleep(.035)
-                self.r.release();time.sleep(.035)
-                frames.append(self.sample('handoff-dash-%d-%d'%(dash_seat,frame),True))
+            for door_index in (0,1):
+                self.r.input(0xffdf,1)
+                try:
+                    self.wait('handoff-dash-entered-%d-%d'%(dash_seat,door_index),lambda s:s['players'][1]['door'],8)
+                    self.wait('handoff-dash-released-%d-%d'%(dash_seat,door_index),lambda s:
+                        not s['players'][1]['door'] and not s['blocked'],20,True)
+                finally:self.r.release()
+                for frame in range(24):
+                    # Dash throughout the passenger arrival, alternating
+                    # direction inside the native boss antechamber.
+                    direction=0xffdf if frame%8<4 else 0xff7f
+                    self.r.input(direction & 0xdfff,dash_seat);time.sleep(.035)
+                    self.r.release();time.sleep(.035)
+                    frames.append(self.sample('handoff-dash-%d-%d-%d'%(dash_seat,door_index,frame),True))
+                self.wait('handoff-dash-arrived-%d-%d'%(dash_seat,door_index),lambda s:
+                    not s['blocked'] and all(p['active'] and p['visible'] and p['hp'] and
+                    p['state']==1 and p['action']>=2 and not p['door'] and not p['script']
+                    for p in s['players']),20,True)
             row=self.wait('handoff-dash-both-ready-'+str(dash_seat),lambda s:
                 not s['blocked'] and all(p['active'] and p['visible'] and p['hp'] and
                 p['state']==1 and p['action']>=2 and not p['door'] and not p['script']
                 for p in s['players']),10,True)
             self.sample('handoff-dash-finished-'+str(dash_seat),True)
             assert any(f['players'][dash_seat]['action'] in (12,13) for f in frames),('No native dash',dash_seat)
-            cases.append(dict(dash_seat=dash_seat,frames=len(frames),ready=row['players']))
+            timings=[]
+            for active in (False,True):
+                start=self.r.request('get_registers')['frame'];begin=time.monotonic()
+                while time.monotonic()-begin<2:
+                    if active:self.r.input((0xffdf if int((time.monotonic()-begin)*4)%2 else 0xff7f)&0xdfff,dash_seat)
+                    time.sleep(.05);self.r.release();time.sleep(.05)
+                end=self.r.request('get_registers')['frame'];elapsed=time.monotonic()-begin
+                timings.append(dict(dashing=active,frames=end-start,seconds=elapsed,fps=(end-start)/elapsed,
+                    phase=self.r.request('phase_profile',window=2)))
+            cases.append(dict(dash_seat=dash_seat,frames=len(frames),ready=row['players'],timings=timings))
         return dict(p2_door_both_dash_seats=cases)
+
+    def cyber_flip_probe(self):
+        owner=getattr(self,'flip_owner',1)
+        self.load(6,1)
+        self.r.fixture(5,0)
+        diag=self.r.diagnostic()
+        self.wait('cyber-flip-native-invulnerability-cleared',lambda s:
+            not self.r.read(diag+0x161,1)[0] and not self.r.read(diag+0x361,1)[0],5)
+        self.r.teleport_both(850,971);self.r.teleport(owner,656,900)
+        rows=[]
+        for frame in range(20):
+            row=self.sample('cyber-flip-probe-%d-%d'%(owner,frame),True)
+            assert all(p['hp']>0 for p in row['players']),('Unsafe flip setup',row['players'])
+            row['flip']=self.r.read(0x801721c0+0x26,1)[0]
+            row['pools']={}
+            for name,address,stride,count in (('general',0x80165a30,0x8c,32),('particles',0x80173ca0,0x60,64)):
+                data=self.r.read(address,stride*count)
+                row['pools'][name]=[dict(slot=i,type=p[1],state=list(p[:8]),
+                    x=struct.unpack_from('<i',p,8)[0]/65536,y=struct.unpack_from('<i',p,12)[0]/65536,
+                    raw=p.hex()) for i in range(count) if (p:=data[i*stride:(i+1)*stride])[0]]
+            rows.append(row)
+            self.r.input(0xbfff if frame%5==0 else 0xffff,owner);time.sleep(.08);self.r.release()
+        (self.output/('cyber-flip-probe-%d.json'%owner)).write_text(json.dumps(rows,indent=2),encoding='utf-8')
+        self.r.fixture(5,3)
+        return dict(owner=owner,frames=len(rows),flips=sorted({r['flip'] for r in rows}),ready=rows[-1]['players'])
+
+    def cyber_flip(self):
+        cases=[]
+        for owner in (1,0):
+            self.flip_owner=owner
+            result=self.cyber_flip_probe()
+            assert result['flips']==[1],result
+            assert all(p['active'] and p['visible'] and p['grounded'] and p['hp']>0
+                       for p in result['ready']),result
+            cases.append(result)
+        return dict(native_shared_flip_switches=cases)
 
     def section_health(self):
         self.load(1,0)
@@ -623,6 +673,10 @@ class Scenarios:
                     x=struct.unpack_from('<i',p,8)[0]/65536,y=struct.unpack_from('<i',p,12)[0]/65536,
                     sprites=hex(struct.unpack_from('<I',p,0x38)[0]),assembly=hex(struct.unpack_from('<I',p,0x3c)[0]))
             row=dict(label=label,players=[actor(0x300),actor(0x100)],bikes=[actor(0x620),actor(0x200)])
+            data=self.r.read(0x8013f328,32*0x9c)
+            row['exhaust']=[dict(slot=i,state=list(p[:8]),priority=p[0x16],
+                x=struct.unpack_from('<i',p,8)[0]/65536,y=struct.unpack_from('<i',p,12)[0]/65536)
+                for i in range(32) if (p:=data[i*0x9c:(i+1)*0x9c])[0] and p[1]==57]
             frames.append(row);self.sample(label,True)
         capture('bike-before-dash')
         for seat in (1,0):
@@ -1212,7 +1266,7 @@ def main():
     parser.add_argument('--clears',type=lambda p:int(p,0),default=16,help='Expected boss bits on cold native card load')
     parser.add_argument('--hold-on-failure',type=int,default=0,
                         help='Keep only this owned hidden process alive for bounded TCP investigation')
-    parser.add_argument('--cases', nargs='+', choices=('jet','bike_probe', 'cyber','handoff_dash','section_health','dash_effects', 'intro','intro_entry','trail_probe','post_victory_trails','open_airdash','train_visual','door_death','train_return','train_deaths','train_boss','arrival_death','combat','jet_boss',
+    parser.add_argument('--cases', nargs='+', choices=('jet','bike_probe', 'cyber','handoff_dash','section_health','dash_effects','cyber_flip_probe','cyber_flip', 'intro','intro_entry','trail_probe','post_victory_trails','open_airdash','train_visual','door_death','train_return','train_deaths','train_boss','arrival_death','combat','jet_boss',
                         'spider_visual','cyber_missiles','spider_hole','victory','diagnostics','audio',
                         'cyber_orb','cyber_course','cyber_moving','volcano_probe','volcano_entry','save_loop','second_save_loop','stage_reentry','portrait_exit','portrait_escape','reload_save','enemy_activation'), default=['jet', 'cyber', 'intro'])
     args = parser.parse_args()

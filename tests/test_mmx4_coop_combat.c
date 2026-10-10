@@ -448,6 +448,8 @@ static void effect_ownership(void) {
     /* Enrollment creates the Chaser's following effects before ready(). */
     ready=0;mmx4_coop_enter_second();CHECK(invoke(EFFECT_ALLOC)==EFFECT);
     psx_mod_write_byte(EFFECT,0x41);
+    psx_mod_write_byte(EFFECT+1,0x0D);
+    CHECK(mmx4_coop_vehicle_effect_owner(EFFECT)==2);
     psx_mod_write_word(EFFECT+0x50,MMX4_VEHICLE);
     psx_mod_write_byte(EFFECT+0x70,0x41);
     psx_mod_write_word(EFFECT+0x70+0x50,MMX4_VEHICLE);
@@ -623,11 +625,34 @@ static void slash_intro_leader(void) {
         CHECK(actor_updates[leader^1]==1 && !actor_updates[leader]);
     }
 }
+static void vehicle_secondary_ownership(void) {
+    for(unsigned seat=0;seat<2;++seat)for(unsigned type=56;type<=57;++type) {
+        setup();const uint32_t actor=0x8013F328u;
+        allocated_actor=actor;ready=0; /* Original enrollment creates exhaust. */
+        if(seat)mmx4_coop_enter_second();
+        CHECK(invoke(0x8002ACA4u)==actor);
+        if(seat)mmx4_coop_leave_second();
+        ready=1;psx_mod_write_byte(actor,1);psx_mod_write_byte(actor+1,(uint8_t)type);
+        psx_mod_write_word(actor+8,(seat?10u:30u)<<16); /* Other rider is nearest. */
+        CHECK(mmx4_coop_vehicle_effect_owner(actor)==seat+1);
+        invoke(0x8002144Cu);
+        CHECK(actor_updates[seat]==1 && !actor_updates[seat^1]);
+        CHECK(ai_target_x[seat]==(seat?30u:10u)<<16 && !projected);
+        alive[seat]=0;invoke(0x8002144Cu);
+        CHECK(actor_updates[seat]==2); /* Native cleanup still advances. */
+        if(!seat)mmx4_coop_enter_second();
+        invoke(0x8002ACA4u);
+        if(!seat)mmx4_coop_leave_second();
+        CHECK(mmx4_coop_vehicle_effect_owner(actor)==(seat^1)+1);
+        psx_mod_write_byte(actor+1,1);CHECK(!mmx4_coop_vehicle_effect_owner(actor));
+    }
+}
 int main(void) {
     CHECK(filter_count==17);
     accepted_events();independent_solids();aim_selection();effect_ownership();armor_handoff();independent_hit_tokens();
     split_native_targets();
     slash_intro_leader();
+    vehicle_secondary_ownership();
     death_particle_ownership();
     for(unsigned campaign=0;campaign<2;++campaign)for(unsigned target=0;target<2;++target) {
         setup();water_updates=0;

@@ -308,6 +308,22 @@ int main(void) {
     CHECK(mmx4_coop_split_scene_camera_begin(1,canonical));
     psx_mod_write_half(CAMERA+0x26,1024);mmx4_coop_split_scene_camera_end(1,canonical,1);
     script_owner=1;mmx4_coop_split_camera_prepare(1);CHECK(psx_mod_read_half(CAMERA+0x26)==1024);
+    /* The Cyber world flips once, and both saved views must follow it.
+     * Fractional current/target Y survives two reflections exactly. */
+    for(unsigned seat=0;seat<2;++seat)for(unsigned layer=0;layer<3;++layer) {
+        uint32_t camera=0x801F0000u+16u+seat*0xFCu+layer*0x54u;
+        psx_mod_write_word(camera+12,0x01234567u);psx_mod_write_word(camera+24,0x02345678u);
+    }
+    mmx4_coop_split_flip_cameras();
+    for(unsigned seat=0;seat<2;++seat)for(unsigned layer=0;layer<3;++layer) {
+        uint32_t camera=0x801F0000u+16u+seat*0xFCu+layer*0x54u;
+        uint32_t axis=layer?0x09000000u:0x07000000u;
+        CHECK(psx_mod_read_word(camera+12)==axis-0x01234567u);
+        CHECK(psx_mod_read_word(camera+24)==axis-0x02345678u);
+        CHECK(psx_mod_read_byte(camera+0x4C)==1);
+    }
+    mmx4_coop_split_flip_cameras();
+    CHECK(psx_mod_read_word(0x801F0000u+16u+12u)==0x01234567u);
     script_owner=-1;split=0;CHECK(mmx4_coop_split_activate());
     /* Unified has no private camera storage, but either living seat must
      * activate the authored secret-room bounds/checkpoint once. */

@@ -96,6 +96,16 @@ void mmx4_coop_split_camera_prepare(unsigned owner) {
         copy_bytes(CAMERA,state+16u+owner*CAMERA_BYTES,CAMERA_BYTES);
     psx_mod_write_word(state+8u,owner+1u);
 }
+void mmx4_coop_split_flip_cameras(void) {
+    if(!available() || !psx_mod_read_word(state))return;
+    for(unsigned seat=0;seat<2;++seat)for(unsigned layer=0;layer<3;++layer) {
+        uint32_t camera=state+16u+seat*CAMERA_BYTES+layer*0x54u;
+        uint32_t axis=layer?0x09000000u:0x07000000u;
+        for(unsigned at=12;at<=24;at+=12)
+            psx_mod_write_word(camera+at,axis-psx_mod_read_word(camera+at));
+        psx_mod_write_byte(camera+0x4C,1);
+    }
+}
 void mmx4_coop_split_camera(CPUState *cpu,unsigned owner) {
     if(!available())return;
     initialize_cameras();
