@@ -402,6 +402,11 @@ class Scenarios:
             try:self.wait('door-death-entered-'+str(owner),lambda s:s['players'][owner]['door'],8)
             finally:self.r.release()
             self.r.request('wtrace_range',lo='0x141924',hi='0x141925')
+            lives=self.r.read(0x801721c0+0x44,1)[0]
+            before_counters=self.r.request('mod_counters')['counters']
+            count=lambda counters:sum(c['count'] for c in counters if c['name']==
+                                      'mmx4.coop.p%d-death-sequences'%(owner+1))
+            before=count(before_counters)
             self.r.fixture(2,owner,0x80)
             self.sample('door-death-fatal-'+str(owner),True)
             row=self.wait('door-death-survivor-released-'+str(owner),lambda s:
@@ -409,9 +414,44 @@ class Scenarios:
                 s['players'][owner^1]['visible'] and s['players'][owner^1]['action']==2 and
                 not s['blocked'] and not any(p['door'] or p['script'] for p in s['players']),15,True)
             self.sample('door-death-survivor-safe-'+str(owner),True)
-            assert row['players'][owner^1]['hp']>0,row
-            cases.append(dict(owner=owner,players=row['players']))
+            assert row['players'][owner^1]['hp']>0 and row['lives']==lives,row
+            after=count(self.r.request('mod_counters')['counters'])
+            assert after-before==1,('Repeated native death sequence',before,after)
+            cases.append(dict(owner=owner,players=row['players'],native_death_sequences=after-before))
         return dict(native_death_during_door=cases)
+
+    def train_return(self):
+        self.load(8,0)
+        self.wait('train-return-start',lambda s:all(p['action']==2 and p['grounded']
+                  for p in s['players']) and not s['blocked'],10)
+        self.r.input(0xfffe,1)
+        try:self.wait('train-withdrawn',lambda s:not s['players'][1]['active'],6)
+        finally:self.r.release()
+        time.sleep(.1)
+        self.r.input(0xfffe,1);time.sleep(.08);self.r.release()
+        row=self.wait('train-return-finished',lambda s:s['players'][1]['active'] and
+                      s['players'][1]['action']==2 and s['players'][1]['grounded'],10)
+        assert all(p['hp']>0 for p in row['players']),row
+        self.sample('train-native-return-safe',True)
+        return dict(native_train_return=True,players=row['players'])
+
+    def arrival_death(self):
+        self.load(6,1,1)
+        self.r.teleport_both(568,2507);self.r.teleport(0,600,2507)
+        self.r.input(0xffdf,0)
+        try:
+            self.wait('arrival-death-door-start',lambda s:s['players'][0]['door'],8)
+            incoming=self.wait('arrival-death-incoming',lambda s:not s['players'][0]['door'] and
+                s['players'][1]['active'] and s['players'][1]['visible'] and
+                s['players'][1]['action']==0,15)
+        finally:self.r.release()
+        self.r.fixture(2,0,0x80)
+        row=self.wait('arrival-death-survivor-ready',lambda s:s['players'][0]['hp']==0 and
+                      s['players'][1]['active'] and s['players'][1]['action']==2 and
+                      s['players'][1]['hp']>0,10)
+        assert row['players'][1]['x']>=688 and row['players'][1]['y']>=2480,row
+        self.sample('arrival-death-kept-new-room',True)
+        return dict(native_leader_death_during_arrival=True,incoming=incoming,players=row['players'])
 
     def combat(self):
         self.intro()
@@ -865,7 +905,7 @@ def main():
     parser.add_argument('--victory-seat',type=int,choices=(0,1),default=1)
     parser.add_argument('--card-seed',type=Path,help='Private native cards to clone and Continue from data1')
     parser.add_argument('--clears',type=lambda p:int(p,0),default=16,help='Expected boss bits on cold native card load')
-    parser.add_argument('--cases', nargs='+', choices=('jet', 'cyber', 'intro','intro_entry','trail_probe','train_visual','door_death','combat','jet_boss',
+    parser.add_argument('--cases', nargs='+', choices=('jet', 'cyber', 'intro','intro_entry','trail_probe','train_visual','door_death','train_return','arrival_death','combat','jet_boss',
                         'spider_visual','cyber_missiles','spider_hole','victory','diagnostics','audio',
                         'cyber_orb','cyber_course','cyber_moving','volcano_probe','volcano_entry','save_loop','second_save_loop','stage_reentry','reload_save','enemy_activation'), default=['jet', 'cyber', 'intro'])
     args = parser.parse_args()

@@ -406,3 +406,20 @@ original rendering. qa-private-primary-render-31 passes train jump/dash
 frames, both Web Spider water pairs and three trails, P2-owned intro entry,
 and Cyber outer/inner arrivals. The exact helmet-only air-dash report remains
 item14 until the open-space airborne fixture is qualified.
+
+## Fatal doorway and committed arrival recovery (2026-10-10)
+
+qa-arrival-death-train-41 reproduces fatal C4 entry for each leading seat.
+The surviving partner inherits the original doorway at its current position,
+initializes native C4 auto-walk, and completes into the room at X729/Y2506-7.
+The dead entrant runs exactly one original death sequence; the survivor retains
+HP32, shared lives remain two, and both C0/C4 gates clear. Only the recovered
+door's controlled auto-walk suppresses crush terrain; normal door entries and
+ordinary terrain resume unchanged. The native death wrapper restores the
+actual preexisting global scene lock rather than inferring it from C4 ownership.
+
+The same run verifies a leader dying while its partner is visibly warping in:
+the arrival anchor remains in the new grounded room and the partner completes
+with HP32. Native train withdrawal/rejoin also completes on the original moving
+platform. The reported later connector-bomb train death sequence still needs
+its own qualification. All 16 title CTests pass this source version.

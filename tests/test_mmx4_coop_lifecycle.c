@@ -678,6 +678,64 @@ int main(void) {
         CHECK(!warp_phase && mmx4_coop_alive(owner^1u));
     }
 
+    /* Death during a committed arrival keeps the survivor in the new
+     * room, rather than restoring the pre-door departure coordinates. */
+    reset();warp_owner=0;warp_phase=1;warp_active=warp_visible=1;
+    warp_origin_x=40u<<16;warp_origin_y=20u<<16;p2[0]=p2[3]=0;
+    psx_mod_write_word(PLAYER+8,640u<<16);psx_mod_write_word(PLAYER+12,180u<<16);
+    psx_mod_write_byte(PLAYER+0x89,8);
+    for(unsigned i=0;i<3;++i)mmx4_coop_lifecycle_tick(&cpu);
+    CHECK(warp_phase==2);
+    psx_mod_write_byte(PLAYER+0x5C,0);psx_mod_write_byte(PLAYER+4,2);
+    mmx4_coop_lifecycle_tick(&cpu);
+    CHECK(!warp_phase && mmx4_coop_alive(1));
+    CHECK(body_word(p2,8)==640u<<16 && body_word(p2,12)==180u<<16);
+
+    /* A native door can lose its initiator during auto-walk. Transfer its
+     * lock to the living partner and leave the corpse to native death. */
+    for(unsigned dead=0;dead<2;++dead) {
+        reset();script_active=1;script_owner=dead;script_serial=5;
+        scenes[0]=(SceneOwner){actor,5,(uint8_t)dead};
+        if(dead) {
+            p2[0x5C]=0x80;p2[5]=0x13;p2[0xC3]=p2[0xC4]=0xFF;
+            p2[10]=0x80;p2[11]=2;p2[14]=144;
+        }else {
+            psx_mod_write_byte(PLAYER+0x5C,0x80);psx_mod_write_byte(PLAYER+5,0x13);
+            psx_mod_write_byte(PLAYER+0xC3,0xFF);psx_mod_write_byte(PLAYER+0xC4,0xFF);
+            psx_mod_write_word(PLAYER+8,640u<<16);psx_mod_write_word(PLAYER+12,144u<<16);
+        }
+        mmx4_coop_lifecycle_tick(&cpu);
+        CHECK(script_active && script_owner==(dead^1u));
+        CHECK(scenes[0].owner==(dead^1u) && scenes[0].recovered);
+        CHECK((dead?p2[4]:psx_mod_read_byte(PLAYER+4))==2);
+        CHECK(!(dead?p2[0xC4]:psx_mod_read_byte(PLAYER+0xC4)));
+        CHECK((dead?psx_mod_read_byte(PLAYER+0xC4):p2[0xC4])==1);
+        CHECK(mmx4_coop_alive(dead^1u) && !mmx4_coop_alive(dead));
+        CHECK((dead?psx_mod_read_word(PLAYER+8):body_word(p2,8))==640u<<16);
+        CHECK((dead?psx_mod_read_word(PLAYER+12):body_word(p2,12))==144u<<16);
+    }
+
+    reset();script_active=1;script_owner=0;cpu.gpr[4]=PLAYER;
+    psx_mod_write_byte(PLAYER+0xC4,1);
+    scenes[0]=(SceneOwner){actor,1,0,0};
+    CHECK(!hidden_terrain(&cpu,0x8002C614u)); /* Native door, not a recovery. */
+    scenes[0].recovered=1;psx_mod_write_byte(PLAYER+0x70,12);
+    psx_mod_write_byte(PLAYER+0x71,3);
+    CHECK(hidden_terrain(&cpu,0x8002C614u));
+    CHECK(psx_mod_read_byte(PLAYER+0x70)==8 && !psx_mod_read_byte(PLAYER+0x71));
+    psx_mod_write_byte(PLAYER+0xC4,0);
+    CHECK(!hidden_terrain(&cpu,0x8002C614u));
+
+    /* Personal C4 doors do not acquire PLAY1C; general C0 scenes do.
+     * A partner's native death must preserve either preexisting gate. */
+    for(unsigned gate=0;gate<2;++gate) {
+        reset();script_active=1;script_owner=0;
+        psx_mod_write_byte(PLAY+0x1C,(uint8_t)gate);
+        mmx4_coop_enter_second();mmx4_coop_call(&cpu,0x80035A6Cu,PLAYER,0);
+        mmx4_coop_leave_second();
+        CHECK(psx_mod_read_byte(PLAY+0x1C)==gate);
+    }
+
     /* Marine Base prohibits withdrawal for the whole bike sequence, even
      * during frames where native mounting fields temporarily clear. */
     reset();inputs[1]=SELECT;psx_mod_write_byte(PLAYER+0xC5,0xFF);
