@@ -11,6 +11,8 @@
 static uint8_t ram[0x200000],second[0xE4],backup[0xE4];
 static unsigned split=1,projected,local_scope,ready=1,capacity=16,allocations,scans;
 static int script_owner=-1;
+static unsigned room_entries,room_owner;
+void mmx4_coop_lifecycle_room_entry(unsigned owner) {++room_entries;room_owner=owner;}
 typedef struct {uint32_t address;PSXModFunctionFilterCallback callback;} Filter;
 static Filter filters[16];static unsigned filter_count;
 static PSXModFunctionEntryCallback spawned;
@@ -313,8 +315,11 @@ int main(void) {
     actor_position(MMX4_PLAYER,100,140);second_position(1200,2000);
     psx_mod_write_half(CAMERA+0x26,0);psx_mod_write_half(CAMERA+0x2C,160);
     area_calls=shared_area_writes=0;cpu.gpr[4]=stage_actor;
+    psx_mod_write_half(CAMERA+0x24,4096);psx_mod_write_half(CAMERA+0x28,2500);
+    psx_mod_write_half(CAMERA+0x2A,0);
     invoke(&cpu,0x800B56F4u);
     CHECK(area_calls==1 && shared_area_writes==1 && !projected);
+    CHECK(room_entries==1 && room_owner==1); /* New shared min-X excludes P1. */
     CHECK(psx_mod_read_half(CAMERA+0x26)==512 && psx_mod_read_half(CAMERA+0x2C)==64);
     CHECK(psx_mod_read_half(MMX4_PLAYER+10)==100);
     psx_mod_write_byte(stage_actor+1,6);checkpoint_calls=0;

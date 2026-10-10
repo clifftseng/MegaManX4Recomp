@@ -389,7 +389,10 @@ static void constrain_team(CPUState *cpu,uint32_t address) {
             if((distance>0 && p<old_p) || (distance<0 && p>old_p))put32(second.body+8,(uint32_t)old_p);
         }
     }
-    int bottom=(int16_t)psx_mod_read_half(0x801419B0u+0x20)+256;
+    /* A scrolling camera can trail a player falling into a boss arena.
+     * Its current viewport is not the room's death plane: use the authored
+     * maximum camera Y, so the native lower platform remains reachable. */
+    int bottom=(int16_t)psx_mod_read_half(0x801419D8u)+256;
     for(unsigned seat=0;seat<2;++seat) {
         int y=seat?(int16_t)(le32(second.body+12)>>16):(int16_t)psx_mod_read_half(PLAYER+14);
         if(mmx4_coop_alive(seat) && y-8>=bottom) {
@@ -510,6 +513,10 @@ static int development_fixture(CPUState *cpu,uint32_t address) {
         if((stage==0 && section==1 && checkpoint<3) ||
            (stage==1 && section==0 && checkpoint<5) ||
            (stage==1 && section==1 && checkpoint<6) ||
+           (stage==4 && section==0 && checkpoint<2) ||
+           (stage==4 && section==1 && checkpoint<4) ||
+           (stage==8 && section==0 && checkpoint<3) ||
+           (stage==8 && section==1 && checkpoint<4) ||
            (stage==6 && section==0 && checkpoint<6) ||
            ((stage==5 || stage==6) && section==1 && checkpoint<2) ||
            (stage==12 && section==1 && checkpoint<7)) {

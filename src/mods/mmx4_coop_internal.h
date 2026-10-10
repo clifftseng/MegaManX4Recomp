@@ -58,6 +58,7 @@ int mmx4_coop_lifecycle_can_tick(void);
 /* -1 during ordinary play; otherwise the native shared script's seat. */
 int mmx4_coop_lifecycle_script_owner(void);
 int mmx4_coop_lifecycle_hidden(unsigned seat);
+void mmx4_coop_lifecycle_room_entry(unsigned owner);
 void mmx4_coop_lifecycle_camera_bounds(CPUState *cpu,unsigned owner);
 void mmx4_coop_clear_current_attacks(void);
 void mmx4_coop_combat_clear_current_effects(void);

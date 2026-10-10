@@ -178,6 +178,8 @@ static int spatial_stage_actor(CPUState *cpu,uint32_t address) {
         eligible[0].active || eligible[1].active?eligible:actors,
         (int16_t)psx_mod_read_half(actor+10u),(int16_t)psx_mod_read_half(actor+14u),0);
     uint8_t canonical[CAMERA_BYTES];
+    int16_t old_bounds[4];
+    for(unsigned i=0;i<4;++i)old_bounds[i]=(int16_t)psx_mod_read_half(CAMERA+0x24u+i*2u);
     int own_camera=target && mmx4_coop_split_scene_camera_begin(target,canonical);
     spatial_call=1;
     uint8_t campaign=psx_mod_read_byte(MMX4_PLAY+0x43);
@@ -189,6 +191,17 @@ static int spatial_stage_actor(CPUState *cpu,uint32_t address) {
     }
     spatial_call=0;
     if(own_camera)mmx4_coop_split_scene_camera_end(target,canonical,0);
+    if(!split && !kind && scene<0 && actors[target].active && actors[target^1u].active) {
+        int16_t bounds[4];
+        for(unsigned i=0;i<4;++i)bounds[i]=(int16_t)psx_mod_read_half(CAMERA+0x24u+i*2u);
+        int narrowed=bounds[0]<old_bounds[0] || bounds[1]>old_bounds[1] ||
+            bounds[2]<old_bounds[2] || bounds[3]>old_bounds[3];
+        Mmx4CoopViewActor other=actors[target^1u];
+        if(narrowed && bounds[0]>=bounds[1] && bounds[2]>=bounds[3] &&
+           (other.world_x<bounds[1] || other.world_x>bounds[0]+320 ||
+            other.world_y<bounds[3] || other.world_y>bounds[2]+256))
+            mmx4_coop_lifecycle_room_entry(target);
+    }
     if(split && !kind && scene<0 && !psx_mod_read_byte(MMX4_PLAY+0x10) && !psx_mod_read_byte(MMX4_PLAY+0x1C)) {
         parameters=psx_mod_read_word(actor+0x18u);
         for(unsigned seat=0;seat<2;++seat)if(in_camera_area(parameters,actors[seat])) {

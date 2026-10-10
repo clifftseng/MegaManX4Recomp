@@ -215,6 +215,55 @@ class Scenarios:
             finally:self.r.release()
         return dict(moving_leaders=cases)
 
+    def volcano_probe(self):
+        self.load(4,1,3)
+        self.sample('volcano-native-checkpoint-3',True)
+        actors=self.r.read(0x80142f98,32*0x30)
+        stage_actors=[]
+        for slot in range(32):
+            actor=actors[slot*0x30:(slot+1)*0x30]
+            if actor[0]:
+                stage_actors.append(dict(slot=slot,type=actor[1],data=actor.hex()))
+        return dict(players=self.sample('volcano-start')['players'],
+                    enemies=self.enemies(),stage_actors=stage_actors)
+
+    def volcano_entry(self):
+        cases=[]
+        for owner in (1,0):
+            self.load(4,1,3)
+            self.sample('volcano-before-drop-'+str(owner),True)
+            self.r.input(0xffdf,owner)
+            try:
+                deadline=time.monotonic()+10
+                captured=0
+                while time.monotonic()<deadline:
+                    row=self.sample('volcano-drop-'+str(owner),captured%8==0)
+                    assert row['players'][owner]['hp']>0,('Leader died during native boss approach',row)
+                    if row['players'][owner]['door'] or row['players'][owner]['script'] or \
+                       (row['players'][owner]['grounded'] and row['players'][owner]['y']>520):
+                        break
+                    captured+=1
+                    time.sleep(.04)
+                else:raise TimeoutError(('Leader did not reach lower arena',row))
+            finally:self.r.release()
+            arrived=self.wait('volcano-partner-arrived-'+str(owner),lambda s:not s['blocked'] and
+                all(p['active'] and p['visible'] and p['hp']>0 and
+                    not p['door'] and not p['script'] and p['grounded'] and p['y']>520
+                    for p in s['players']),20,True)
+            self.sample('volcano-safe-landing-'+str(owner),True)
+            self.r.input(0xffdf,owner)
+            try:
+                self.wait('volcano-native-boss-'+str(owner),lambda s:any(
+                    e['hp']>=32 and e['state'][0] for e in self.enemies()),10)
+            finally:self.r.release()
+            self.wait('volcano-fight-live-'+str(owner),lambda s:not s['blocked'] and not s['warning'] and
+                all(p['active'] and p['visible'] and p['hp']>0 and p['state']==1 and
+                    p['action']==2 and not p['door'] and not p['script']
+                    for p in s['players']),25,True)
+            self.sample('volcano-fight-ready-'+str(owner),True)
+            cases.append(dict(owner=owner,arrival=arrived,enemies=self.enemies()))
+        return dict(native_approaches=cases,both_alive=True)
+
     def intro(self):
         self.load(0, 1, 2)
         self.r.teleport_both(4208, 443)
@@ -684,7 +733,7 @@ def main():
     parser.add_argument('--clears',type=lambda p:int(p,0),default=16,help='Expected boss bits on cold native card load')
     parser.add_argument('--cases', nargs='+', choices=('jet', 'cyber', 'intro','combat','jet_boss',
                         'spider_visual','cyber_missiles','spider_hole','victory','diagnostics','audio',
-                        'cyber_orb','cyber_course','cyber_moving','save_loop','second_save_loop','stage_reentry','reload_save','enemy_activation'), default=['jet', 'cyber', 'intro'])
+                        'cyber_orb','cyber_course','cyber_moving','volcano_probe','volcano_entry','save_loop','second_save_loop','stage_reentry','reload_save','enemy_activation'), default=['jet', 'cyber', 'intro'])
     args = parser.parse_args()
     for name in ('exe', 'bios', 'disc', 'game', 'output'):
         setattr(args, name, getattr(args, name).resolve())

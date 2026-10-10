@@ -280,6 +280,16 @@ static void request_script_departure(unsigned owner) {
         warp_owner=owner;warp_pending=1;
     }
 }
+void mmx4_coop_lifecycle_room_entry(unsigned owner) {
+    if(owner>1 || !mmx4_coop_ready() || mmx4_coop_projected() ||
+       script_active || warp_pending || warp_phase || departed ||
+       !mmx4_coop_alive(owner) || !mmx4_coop_alive(owner^1u))return;
+    /* A committed shared-room boundary may precede the boss's dialogue.
+     * Carry the excluded partner through the same native outgoing/incoming
+     * sequence; arrival waits for the leading player to reach the floor. */
+    warp_owner=owner;warp_pending=1;
+    psx_mod_counter_add("mmx4.coop.room-departures",1);
+}
 static uint32_t body_word(const uint8_t *body,unsigned at) {
     return (uint32_t)body[at]|(uint32_t)body[at+1]<<8|
         (uint32_t)body[at+2]<<16|(uint32_t)body[at+3]<<24;
