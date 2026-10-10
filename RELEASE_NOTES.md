@@ -1,4 +1,38 @@
-# Mega Man X4 Recompiled — v0.1.1-coop-playtest.3
+# Mega Man X4 Recompiled — v0.1.1-coop-playtest.4
+
+Next co-op playtest candidate. A Linux AppImage is planned; the owner is
+testing the current Windows development build. Unified remains the default,
+and Split cameras remain experimental.
+
+- Lobby Play carries the settled BIOS selection into startup. Updated shared
+  launcher and network dependencies retain the ICE and host handoffs.
+- Both players use paired native arrivals for stage entry, forward sections
+  and team retry. Cyber Peacock course portals return living players to safe
+  native landings; boss approaches preserve the surviving player's controls.
+- Dash exhaust, trails and delayed attack effects use their allocating
+  character and position. Ride Chaser riders, bikes and exhaust stay together;
+  Zero's fire/ice fragments and X's special effects retain their own graphics.
+- Shared dialogue setup preserves the native palette. Pause fades retain the
+  partner body, effects and HUD, with character textures preserved across scenes.
+- P1 owns the campaign and permanent upgrades. Continue, native cards and
+  cleared portraits retain that progress through Quit and Escape Device returns.
+- A surviving P2 can continue native stage transitions after P1 dies.
+- Zero can use the partner's Lightning Web as a native wall-jump anchor.
+- Split train scenery correction remains pending native qualification.
+
+The stable [October 10 checklist](docs/COOP_PLAYTEST_FEEDBACK_20261010.md)
+tracks all 28 reports and their individual evidence. The train scenery report
+remains open; this candidate does not claim all 28 are complete. Current title
+checks pass, while the connected Split qualification and public Linux rebuild/package
+checks are still pending.
+
+The Windows/Linux launcher retains its two-player lobby and two independent
+local controller assignments. Stacked HUD remains the default, with Side by
+side available. Playtest Diagnostics remains enabled by default and records
+accepted inputs plus starting cards/mod choices under `saves/diagnostics`.
+Use matching builds and OpenGL on both peers, with a fresh boot after mod changes.
+
+## Previous v0.1.1-coop-playtest.3
 
 Two-player co-op regression update for Windows and Linux. Unified remains
 the default; online Split cameras remain experimental.

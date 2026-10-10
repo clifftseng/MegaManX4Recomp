@@ -1,4 +1,35 @@
-# Co-op playtest 2
+# Co-op playtest 4 candidate
+
+Version: `v0.1.1-coop-playtest.4`. The next planned artifact is a Linux
+x86_64 AppImage. The owner is validating the current Windows development
+build; a new Windows release package has not been prepared.
+
+Current changes are summarized in [release notes](../RELEASE_NOTES.md).
+The stable [October 10 checklist](COOP_PLAYTEST_FEEDBACK_20261010.md) records
+the 28 reports separately. Split train scenery (item28), connected Split
+gameplay qualification and the public Linux rebuild/package checks are pending;
+prior release fingerprints and artifact hashes below remain historical evidence.
+
+Unified and Stacked remain defaults; Split remains experimental. The native
+Windows/Linux lobby, two local controller assignments, Side by side HUD
+choice and default-on Playtest Diagnostics remain available. Production
+builds require `MMX4_COOP_NETPLAY_DEBUG=OFF` and `PSX_DEBUG_TOOLS=OFF`.
+
+Prepare a fresh private Linux source snapshot with
+[stage_linux_sources.py](../tools/stage_linux_sources.py), using
+`--require-clean` after the final source and recursive pins are committed.
+After the production rebuild, use
+[package_native_appimage.sh](../tools/package_native_appimage.sh) and
+[test_appimage_layout.sh](../tools/test_appimage_layout.sh). Final execution,
+compatibility and artifact hashes must come from that candidate.
+
+## Previous co-op playtest 3
+
+Published `v0.1.1-coop-playtest.3` supplied Windows and Linux packages.
+Its [26-item checklist](COOP_PLAYTEST_REGRESSIONS.md) and validation summary
+remain under Previous in [release notes](../RELEASE_NOTES.md).
+
+## Previous co-op playtest 2
 
 Version: `v0.1.1-coop-playtest.2`. The owner-approved Windows executable is
 `60ec07fe7597cec9a1a3ad0d12ecb019c3c7ae72b4f6e1197248419151b134f1`.
