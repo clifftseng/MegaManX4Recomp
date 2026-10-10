@@ -498,8 +498,15 @@ static int development_fixture(CPUState *cpu,uint32_t address) {
         fixture_sequence=sequence;
     }
     if(enrolled && psx_mod_read_byte(PLAY)==6) {
-        if((fixture_invulnerable&1u) && mmx4_coop_alive(0))psx_mod_write_byte(PLAYER+0x61,127);
-        if((fixture_invulnerable&2u) && mmx4_coop_alive(1))second.body[0x61]=127;
+        if((fixture_invulnerable&1u) && mmx4_coop_alive(0)) {
+            psx_mod_write_byte(PLAYER+0x61,127);
+            if(psx_mod_read_byte(PLAYER+0xC5) && psx_mod_read_byte(MMX4_VEHICLE))
+                psx_mod_write_byte(MMX4_VEHICLE+0x61,127);
+        }
+        if((fixture_invulnerable&2u) && mmx4_coop_alive(1)) {
+            second.body[0x61]=127;
+            if(second.body[0xC5] && second.vehicle[0])second.vehicle[0x61]=127;
+        }
     }
     if(!command)return 0;
     psx_mod_write_word(diagnostic+0x54,2); /* Rejected until applied below. */
@@ -648,9 +655,16 @@ static uint16_t ui_tile(unsigned character,uint16_t page,uint16_t clut,uint16_t 
     UiBank *b=&cache[(*count)++];
     *b=(UiBank){page,clut,uv,id,{0},character};memcpy(b->colors,colors,32);return id;
 }
+static int world_draw_visible(void) {
+    if(psx_mod_read_byte(PLAY)!=6)return 0;
+    unsigned phase=psx_mod_read_byte(PLAY+1);
+    /* Native pause fades draw the world while gameplay remains in minor2.
+     * Keep both seats in those world passes; Quit Game has its own backdrop. */
+    return phase==0 || (phase==2 && psx_mod_read_byte(0x801754A5u)<6);
+}
 static int coop_hud(CPUState *cpu,uint32_t address) {
-    if(hud_call || projected || !mmx4_coop_ready() || psx_mod_read_byte(PLAY)!=6 ||
-       psx_mod_read_byte(PLAY+1)!=0)return 0;
+    if(hud_call || projected || !mmx4_coop_ready() || !world_draw_visible())return 0;
+    if(psx_mod_read_byte(PLAY+1)==2)psx_mod_counter_add("mmx4.coop.pause-world-hud-draws",1);
     int own_hud=split_views && psx_mod_local_view_scope();
     hud_call=1;uint32_t result=own_hud && local_view_seat?0:
         guest(cpu,address,cpu->gpr[4],cpu->gpr[5]);
@@ -744,8 +758,8 @@ static void render_actor(CPUState *cpu,uint32_t actor,uint32_t base,unsigned cha
     }
 }
 static int render(CPUState *cpu,uint32_t address) {
-    if(rendering || inside || projected || failed || !enrolled || psx_mod_read_byte(PLAY)!=6 ||
-       psx_mod_read_byte(PLAY+1)!=0)return 0;
+    if(rendering || inside || projected || failed || !enrolled || !world_draw_visible())return 0;
+    if(psx_mod_read_byte(PLAY+1)==2)psx_mod_counter_add("mmx4.coop.pause-world-player-draws",1);
     rendering=1;
     uint32_t result=guest(cpu,address,cpu->gpr[4],cpu->gpr[5]);
     enter_second();
@@ -766,8 +780,7 @@ static int render(CPUState *cpu,uint32_t address) {
 }
 static int render_owned_effect(CPUState *cpu,uint32_t address) {
     (void)address;
-    if(rendering || projected || !mmx4_coop_ready() || psx_mod_read_byte(PLAY)!=6 ||
-       psx_mod_read_byte(PLAY+1)!=0)return 0;
+    if(rendering || projected || !mmx4_coop_ready() || !world_draw_visible())return 0;
     uint32_t actor=cpu->gpr[4],assembly=psx_mod_read_word(actor+0x3C);
     unsigned character=counterpart;
     if(assembly<assets[counterpart].assembly || assembly-assets[counterpart].assembly>=0xC000) {

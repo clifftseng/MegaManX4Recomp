@@ -503,6 +503,15 @@ static void update_actor(CPUState *cpu,uint32_t address) {
     int owner=mmx4_coop_lifecycle_script_owner();
     unsigned target=owner>=0?(unsigned)owner:mmx4_coop_view_nearest(actors,
         (int16_t)psx_mod_read_half(actor+10),(int16_t)psx_mod_read_half(actor+14),0);
+    /* Slash Beast waits at X9312 but native8006DC24 triggers on player
+     * X>=9472. Nearest-to-boss selects the partner left behind and prevents
+     * the leading seat from committing the introduction. Once C0 starts,
+     * the ordinary script-owner latch takes over. Fight AI remains nearest. */
+    if(owner<0 && actor_pool==0x80021234u &&
+       psx_mod_read_byte(MMX4_PLAY+0x0C)==8 && psx_mod_read_byte(MMX4_PLAY+0x0D)==1 &&
+       psx_mod_read_byte(actor+1)==54 && psx_mod_read_byte(actor+4)==1 &&
+       psx_mod_read_byte(actor+5)==9 && !psx_mod_read_byte(actor+6))
+        target=!actors[0].active || (actors[1].active && actors[1].world_x>actors[0].world_x);
     actor_owner=target;
     actor_campaign=psx_mod_read_byte(MMX4_PLAY+0x43);
     uint32_t result=0;

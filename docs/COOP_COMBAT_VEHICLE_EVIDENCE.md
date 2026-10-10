@@ -423,3 +423,61 @@ the arrival anchor remains in the new grounded room and the partner completes
 with HP32. Native train withdrawal/rejoin also completes on the original moving
 platform. The reported later connector-bomb train death sequence still needs
 its own qualification. All 16 title CTests pass this source version.
+
+qa-slash-pause-airdash-48 subsequently exercises native sequential P2/P1
+deaths at train checkpoints0 and2. Both original arrivals finish at platform
+Y394-395 and Y346-347 respectively; both players have HP32, normal action2,
+visible/active bodies, and grounded terrain. Each retry spends one shared life.
+Its open-space Jump/Right/Dash input also captures24 frames across three actual
+Zero air dashes (native action13); X's complete body remains visible in the
+inspected action13 captures, qualifying the immutable primary body rendering.
+
+## Slash Beast entrance and post-victory trails (2026-10-10)
+
+Original8006DC24 starts Slash Beast's intro when playerX>=9472. The waiting
+boss actor is atX9312, so nearest-player routing chooses the partner behind
+the advancing player. Select the leading living seat only for stage8/section1
+type54 state1/phase9/subphase0. Once C0 starts, normal script ownership keeps
+the intro stable; ordinary fight targeting stays nearest. Both-seat ownership
+tests and all16 title CTests pass. Native QA49/50 crosses the original trigger
+with controller input from the verified last-carriage platform atX9360.
+Both leading seats complete original warning/intro, partner arrival and fight
+with both HP32, both visible/normal, atX9473/Y394-395.
+
+QA49 additionally kills Jet with a real P2 attack after a bossHP1 setup,
+completes original reward/Save UI, and enters the train. Three red Zero trails
+remain visible before and after native withdrawal/rejoin.
+
+## Shared dialogue, pause fades and forward-section health (2026-10-10)
+
+Native8002217C saves and replaces64 textbox palette bytes at canonical
+scratchpad palette+2A0, sets80166BB0 dirty, and binds the shared script.
+A private AI projection previously discarded that dirty flag and kept the
+palette edit private. Run this global initialization canonically while
+preserving story campaign identity and the committing seat's dialogue input.
+Both-roster boundary tests prove the dirty flag survives and P2 resources
+remain unchanged. Native P2-first Slash dialogue captures still need a
+visible panel qualification; item9 remains open.
+
+When native pause fades render the world, also render the partner and HUD.
+QA51/52/54 each exercise four pause/resume sequences and long resumed P2
+attacks; both world-fade counters reach288 and advance on every pause.
+Frontend scene ownership is limited to gameplay/transition dispatcher modes;
+native Quit/current-data Continue and Escape/Save preserve both completed
+portraits after two real boss clears in QA50.
+
+Native80035240 fills HP from PLAY+46 for spawn policy0/-2 and preserves
+resources for-1. Carrying the partner's prior HP unconditionally cancelled
+that refill. Living forward-section arrivals now retain the initialized
+maximum; same-section checkpoints, carried corpses and withdrawal keep
+their old state. QA55 initializes Web Spider section1 with P2 HP8->32 and
+two shared lives. Both-roster boundary tests include the upgraded HP40 maximum,
+all three policies and preserved personal weapon/ammo. All16 title CTests pass.
+
+QA53/54 verify Ride Chaser ground Dash is native phase5 (air Dash is2), with
+changing rider frames and bike frame3 for both arrangements. The animation
+report is not reproduced; the mixed rider/bike/exhaust layering remains open.
+QA55 also performs P2-first Cyber outer entry followed immediately by either
+seat dashing during partner arrival:24 captures each, both arrive healthy,
+visible and unlocked. Further boss/event paths and timing qualification are
+tracked in items14/23.

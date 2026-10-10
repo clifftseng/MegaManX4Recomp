@@ -600,10 +600,34 @@ static void split_native_targets(void) {
     setup();CPUState cpu={0};cpu.gpr[2]=NATIVE_AI;cpu.gpr[4]=0x8013BED0u;
     redirects[0](&cpu,0x80021300u);CHECK(cpu.gpr[2]==NATIVE_AI);
 }
+static void slash_intro_leader(void) {
+    for(unsigned leader=0;leader<2;++leader) {
+        setup_split_actors(0);
+        psx_mod_write_byte(MMX4_PLAY+0x0C,8);psx_mod_write_byte(MMX4_PLAY+0x0D,1);
+        const uint32_t actor=0x8013BED0u;
+        psx_mod_write_byte(actor+0x9C,0);
+        psx_mod_write_byte(actor+1,54);psx_mod_write_byte(actor+4,1);
+        psx_mod_write_byte(actor+5,9);psx_mod_write_byte(actor+6,0);
+        psx_mod_write_word(MMX4_PLAYER+8,(leader?9360u:9500u)<<16);
+        second[10]=(uint8_t)(leader?9500u:9360u);second[11]=(uint8_t)((leader?9500u:9360u)>>8);
+        psx_mod_write_word(actor+8,9312u<<16);
+        invoke(0x80021234u);
+        CHECK(actor_updates[leader]==1 && !actor_updates[leader^1]);
+        CHECK(ai_target_x[leader]==9500u<<16 && !projected);
+        /* Outside the entrance gate, regular fight targeting remains nearest. */
+        memset(actor_updates,0,sizeof actor_updates);psx_mod_write_byte(actor+6,1);
+        invoke(0x80021234u);
+        CHECK(actor_updates[leader^1]==1 && !actor_updates[leader]);
+        memset(actor_updates,0,sizeof actor_updates);psx_mod_write_byte(actor+6,0);
+        script_owner=(int)(leader^1);invoke(0x80021234u);
+        CHECK(actor_updates[leader^1]==1 && !actor_updates[leader]);
+    }
+}
 int main(void) {
     CHECK(filter_count==17);
     accepted_events();independent_solids();aim_selection();effect_ownership();armor_handoff();independent_hit_tokens();
     split_native_targets();
+    slash_intro_leader();
     death_particle_ownership();
     for(unsigned campaign=0;campaign<2;++campaign)for(unsigned target=0;target<2;++target) {
         setup();water_updates=0;

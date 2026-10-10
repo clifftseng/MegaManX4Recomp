@@ -18,6 +18,7 @@ static int split_views;
 static unsigned stage_script_calls,scene_calls,observed_controls;
 static unsigned boundary_calls[2];
 static unsigned dialogue_calls,dialogue_edge;
+static unsigned dialogue_init_calls,dialogue_init_character,stage_script_projected;
 static uint8_t p2_solid_bits;
 static uint16_t inputs[2];
 typedef struct { uint32_t address;PSXModFunctionFilterCallback filter; } Filter;
@@ -146,6 +147,12 @@ uint32_t mmx4_coop_call(CPUState *cpu,uint32_t address,uint32_t a0,uint32_t a1) 
     case 0x80021D20:
         ++dialogue_calls;dialogue_edge=psx_mod_read_half(0x80166C0Cu);
         observed_campaign=psx_mod_read_byte(MMX4_PLAY+0x43);assert(!projected);break;
+    case 0x8002217C:
+        ++dialogue_init_calls;assert(!projected);
+        dialogue_init_character=psx_mod_read_byte(MMX4_PLAYER+2);
+        observed_campaign=psx_mod_read_byte(MMX4_PLAY+0x43);
+        psx_mod_write_byte(0x80166BB0u,(uint8_t)(psx_mod_read_byte(0x80166BB0u)|1u));
+        break;
     case 0x8002FCAC:
         observed_campaign=psx_mod_read_byte(MMX4_PLAY+0x43);
         observed_menu_select=psx_mod_read_half(0x80166C0Cu)&0x100u;
@@ -212,6 +219,8 @@ uint32_t mmx4_coop_call(CPUState *cpu,uint32_t address,uint32_t a0,uint32_t a1) 
         psx_mod_write_byte(MMX4_PLAY+0x47,2);psx_mod_write_byte(MMX4_PLAYER+0xA7,2);break;
     case 0x8002166C:
         ++stage_script_calls;observed_campaign=psx_mod_read_byte(MMX4_PLAY+0x43);
+        stage_script_projected=projected;
+        if(psx_mod_read_byte(MMX4_PLAY)==3)assert(!projected);
         mmx4_coop_call(cpu,0x80036AE4u,0x15,0x40);
         psx_mod_write_byte(MMX4_PLAY+0x1D,9);break;
     case 0x800C2BE0:
@@ -263,7 +272,7 @@ static void reset(void) {
     world_calls=observed_campaign=pause_commit=pause_exit=world_draws=0;
     stage_script_calls=scene_calls=observed_controls=p2_solid_bits=0;
     memset(boundary_calls,0,sizeof boundary_calls);
-    dialogue_calls=dialogue_edge=0;
+    dialogue_calls=dialogue_edge=dialogue_init_calls=dialogue_init_character=stage_script_projected=0;
     collect_calls[0]=collect_calls[1]=0;ready=1;split_views=0;
     psx_mod_write_byte(MMX4_PLAYER,1);psx_mod_write_byte(MMX4_PLAYER+3,1);
     psx_mod_write_byte(MMX4_PLAYER+4,1);psx_mod_write_byte(MMX4_PLAYER+0x5C,16);
@@ -472,10 +481,11 @@ int main(void) {
     mmx4_coop_lifecycle_reset();
     psx_mod_write_byte(PLAYER+4,1);psx_mod_write_byte(PLAYER+0x5C,32);
     psx_mod_write_byte(MMX4_VEHICLE,1);psx_mod_write_byte(MMX4_VEHICLE+3,1);
+    p2[0x5C]=32; /* Native counterpart initializer has run. */
     mmx4_coop_lifecycle_enrolled(&cpu);
     CHECK(psx_mod_read_byte(PLAYER+4)==3 && !psx_mod_read_byte(PLAYER+0x5C));
     CHECK(!psx_mod_read_byte(MMX4_VEHICLE) && !psx_mod_read_byte(MMX4_VEHICLE+3));
-    CHECK(p2[0x5C]==12 && p2[4]==1);
+    CHECK(p2[0x5C]==32 && p2[4]==1);
 
     /* A living P1 must not turn into a corpse when the same native clear
      * runs during section transfer or same-assets checkpoint initialization. */
@@ -489,9 +499,10 @@ int main(void) {
         psx_mod_write_byte(PLAYER+4,0);psx_mod_write_byte(PLAYER+0x5C,0);
         mmx4_coop_lifecycle_reset();CHECK(!first_before_clear_valid);
         psx_mod_write_byte(PLAYER+4,1);psx_mod_write_byte(PLAYER+0x5C,32);
+        p2[0x5C]=32;
         mmx4_coop_lifecycle_enrolled(&cpu);
         CHECK(psx_mod_read_byte(PLAYER+4)==1 && psx_mod_read_byte(PLAYER+0x5C)==32);
-        CHECK(p2[4]==1 && p2[0x5C]==12);
+        CHECK(p2[4]==1 && p2[0x5C]==(full?32:12));
     }
 
     /* A healthy scripted OWNER also ends in native state3, without being
@@ -508,7 +519,7 @@ int main(void) {
         psx_mod_write_byte(PLAYER+4,1);psx_mod_write_byte(PLAYER+0x5C,16);
         p2[0]=p2[3]=p2[4]=1;p2[0x5C]=32;
         mmx4_coop_lifecycle_enrolled(&cpu);
-        CHECK(p2[4]==1 && p2[0x5C]==12);
+        CHECK(p2[4]==1 && p2[0x5C]==(full?32:12));
         CHECK(psx_mod_read_byte(PLAYER+4)==1 && psx_mod_read_byte(PLAYER+0x5C)==16);
     }
     for(unsigned seat=0;seat<2;++seat) {
@@ -573,7 +584,7 @@ int main(void) {
         psx_mod_write_byte(PLAYER+4,1);psx_mod_write_byte(PLAYER+0x5C,16);
         p2[0]=p2[3]=p2[4]=1;p2[0x5C]=32;
         mmx4_coop_lifecycle_enrolled(&cpu);
-        CHECK(p2[0x5C]==12 && p2[4]==1);
+        CHECK(p2[0x5C]==32 && p2[4]==1);
         CHECK(psx_mod_read_byte(PLAYER+4)==1 && psx_mod_read_byte(PLAYER+0x5C)==16);
     }
     reset();mmx4_coop_lifecycle_reset();departed=1;p2[0]=0;p2[4]=3;
@@ -588,6 +599,25 @@ int main(void) {
     psx_mod_write_byte(PLAYER+4,1);psx_mod_write_byte(PLAYER+0x5C,32);
     p2[4]=1;p2[3]=1;p2[0x5C]=32;mmx4_coop_lifecycle_enrolled(&cpu);
     CHECK(p2[4]==3 && !p2[0x5C]);CHECK(psx_mod_read_byte(PLAYER+4)==1);
+
+    /* Native forward-section refill policies0/-2 heal living P2 to the
+     * initialized upgraded maximum, while -1 retains personal resources. */
+    for(unsigned campaign=0;campaign<2;++campaign)for(unsigned policy=0;policy<3;++policy) {
+        reset();psx_mod_write_byte(PLAYER+2,(uint8_t)campaign);
+        psx_mod_write_byte(PLAY+0x43,(uint8_t)campaign);p2[2]=(uint8_t)(campaign^1u);
+        mmx4_coop_enter_second();mmx4_coop_leave_second();
+        mmx4_coop_lifecycle_reset();p2[0xA8]=7;p2[0x93]=3;
+        psx_mod_write_byte(PLAY+0x0D,1);
+        psx_mod_write_byte(PLAY+0x1E,(uint8_t)(policy?253+policy:0));
+        mmx4_coop_lifecycle_reset();
+        p2[0]=p2[3]=p2[4]=1;p2[0x5C]=40;
+        mmx4_coop_lifecycle_enrolled(&cpu);
+        CHECK(p2[0x5C]==(policy==2?12:40));
+        CHECK(p2[0x5D]==p2[0x5C] && p2[0x5E]==p2[0x5C]);
+        CHECK(p2[0xA8]==7 && p2[0x93]==3);
+        CHECK(psx_mod_read_byte(PLAY+0x44)==2);
+        CHECK(!carry_refill);
+    }
 
     /* Game-over Continue increases 0 to 2 after a team wipe; it is still a
      * team respawn. The native 0->255 underflow must not preserve corpses. */
@@ -870,6 +900,32 @@ int main(void) {
     CHECK(dialogue_calls==2 && !dialogue_edge);
     script_active=0;mmx4_coop_call(&cpu,0x80021D20u,0,0);
     CHECK(dialogue_calls==3 && !dialogue_edge);
+
+    /* Returning to stage selection clears P1's gameplay body. The native
+     * frontend still updates its own stage-script pool; P2 has no campaign
+     * and must not replace its palette/resources or acquire its story input. */
+    reset();psx_mod_write_word(PLAY,3);psx_mod_write_byte(PLAYER+4,0);
+    psx_mod_write_byte(PLAYER+0x5C,0);uint8_t front_p2[0xE4];memcpy(front_p2,p2,sizeof front_p2);
+    mmx4_coop_call(&cpu,0x8002166Cu,0,0);
+    CHECK(stage_script_calls==1 && !stage_script_projected && !projected && observed_campaign==0);
+    CHECK(!script_active && !memcmp(front_p2,p2,sizeof front_p2));
+    script_active=script_owner=1;story_pad[2]=0x40;psx_mod_write_half(PAD+4,0x800);
+    mmx4_coop_call(&cpu,0x80021D20u,0,0);
+    CHECK(dialogue_calls==1 && dialogue_edge==0x800);
+
+    for(unsigned campaign=0;campaign<2;++campaign)for(unsigned story=0;story<2;++story) {
+        reset();psx_mod_write_byte(PLAY+0x43,(uint8_t)campaign);
+        psx_mod_write_byte(PLAYER+2,(uint8_t)campaign);p2[2]=(uint8_t)(campaign^1u);
+        uint8_t hp=p2[0x5C];mmx4_coop_enter_second();
+        uint8_t projected_campaign=story?(uint8_t)campaign:(uint8_t)(campaign^1u);
+        psx_mod_write_byte(PLAY+0x43,projected_campaign);
+        mmx4_coop_call(&cpu,0x8002217Cu,16,255);
+        CHECK(dialogue_init_calls==1 && observed_campaign==campaign && dialogue_init_character==campaign && projected);
+        CHECK(psx_mod_read_byte(PLAY+0x43)==projected_campaign && psx_mod_read_byte(PLAYER+0x5C)==hp);
+        psx_mod_write_byte(PLAY+0x43,(uint8_t)(campaign^1u));mmx4_coop_leave_second();
+        CHECK(psx_mod_read_byte(PLAY+0x43)==campaign && p2[0x5C]==hp);
+        CHECK(psx_mod_read_byte(0x80166BB0u)&1u);
+    }
     reset();psx_mod_write_word(PLAYER+8,0x1000000u);p2[11]=2;
     psx_mod_write_word(actor+8,0x2000000u);
     psx_mod_write_byte(actor,1);psx_mod_write_byte(actor+4,1);

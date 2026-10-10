@@ -31,7 +31,7 @@ static uint16_t menu_previous[2], select_previous;
 static uint16_t story_pad[3];
 static unsigned inventory_initialized, inventory_projected;
 static unsigned stage_known, last_stage, last_section, last_lives;
-static unsigned carry_resources, carry_dead, carry_first_dead, carry_departure;
+static unsigned carry_resources, carry_dead, carry_first_dead, carry_departure, carry_refill;
 static unsigned departed, select_ticks, select_release, rejoin_pending;
 static unsigned full_stage_load;
 static unsigned reward_committed;
@@ -41,7 +41,7 @@ static uint8_t departure_vehicle_active, departure_vehicle_visible;
 static unsigned menu_active, menu_owner, menu_projecting;
 static unsigned normal_guard, menu_guard, world_guard, pickup_guard;
 static unsigned collect_guard, save_guard, reward_guard, death_guard, capsule_guard;
-static unsigned scene_guard, script_pool_guard, command_guard, control_guard,text_guard;
+static unsigned scene_guard, script_pool_guard, command_guard, control_guard,text_guard,text_init_guard;
 static unsigned script_active, script_owner, script_serial;
 static unsigned warp_pending,warp_phase,warp_owner,warp_guard,warp_unlocked_ticks;
 static uint8_t warp_active,warp_visible,warp_vehicle_active,warp_vehicle_visible;
@@ -117,7 +117,7 @@ static void fresh_game(CPUState *cpu,uint32_t address) {
     memset(menu_previous,0,sizeof menu_previous);
     memset(story_pad,0,sizeof story_pad);
     inventory_initialized=inventory_projected=stage_known=0;
-    carry_resources=carry_dead=carry_first_dead=carry_departure=0;
+    carry_resources=carry_dead=carry_first_dead=carry_departure=carry_refill=0;
     departed=select_ticks=select_release=select_previous=rejoin_pending=0;
     full_stage_load=0;
     reward_committed=0;
@@ -141,7 +141,7 @@ static void stage_selection(CPUState *cpu,uint32_t address) {
      * stage_initialization. Selecting the same stage afterward is a fresh
      * entry, not a section transfer with a frontend-zeroed P1 corpse. */
     stage_known=0;first_before_clear_valid=0;
-    carry_resources=carry_dead=carry_first_dead=carry_departure=0;
+    carry_resources=carry_dead=carry_first_dead=carry_departure=carry_refill=0;
 }
 static unsigned seat_was_dead(unsigned seat) {
     const uint8_t *body=mmx4_coop_second_body();
@@ -198,6 +198,12 @@ void mmx4_coop_lifecycle_reset(void) {
         !team_was_dead && (!full_stage_load || section!=last_section);
     carry_dead=carry_resources && second_was_dead;
     carry_first_dead=carry_resources && first_was_dead;
+    /* Original 80035240 refills HP for spawn policies0 and-2. A living
+     * counterpart follows that policy when advancing to the next section;
+     * same-section checkpoints and carried deaths retain their resources. */
+    unsigned spawn_policy=psx_mod_read_byte(PLAY+0x1E);
+    carry_refill=carry_resources && section!=last_section && !carry_dead && !departed &&
+        (spawn_policy==0 || spawn_policy==254);
     first_before_clear_valid=0;
     carry_departure=carry_resources && departed;
     if(carry_resources && inventory_initialized) {
@@ -218,6 +224,7 @@ void mmx4_coop_lifecycle_reset(void) {
 void mmx4_coop_lifecycle_enrolled(CPUState *cpu) {
     uint8_t *body=mmx4_coop_second_body();
     if(carry_resources) {
+        if(carry_refill)second_inventory.hp=body[0x5C]&127u;
         body[0x5C]=body[0x5D]=body[0x5E]=second_inventory.hp;
         memcpy(body+0xA8,second_inventory.ammo,16);
         body[0x93]=second_inventory.weapon;
@@ -246,7 +253,7 @@ void mmx4_coop_lifecycle_enrolled(CPUState *cpu) {
         psx_mod_write_byte(PLAYER+6,0);
         psx_mod_write_byte(MMX4_VEHICLE,0);psx_mod_write_byte(MMX4_VEHICLE+3,0);
     }
-    carry_resources=carry_dead=carry_first_dead=carry_departure=0;
+    carry_resources=carry_dead=carry_first_dead=carry_departure=carry_refill=0;
     if(!departed && body[4]==1 && !body[0xC5]) {
         warp_owner=0;warp_active=body[0];warp_visible=body[3];
         warp_vehicle_active=warp_vehicle_visible=0;
@@ -873,8 +880,12 @@ static uint32_t call_story_as_second(CPUState *cpu,uint32_t address,uint32_t act
     psx_mod_write_byte(PLAY+0x43,character);
     mmx4_coop_leave_second();write_bytes(PAD,pad,sizeof pad);return result;
 }
+static int gameplay_scene(void) {
+    unsigned mode=psx_mod_read_byte(PLAY);
+    return mode==6 || mode==7 || mode==10 || mode==11;
+}
 static int stage_scripts(CPUState *cpu,uint32_t address) {
-    if(script_pool_guard || !mmx4_coop_ready() || mmx4_coop_projected() ||
+    if(script_pool_guard || !mmx4_coop_ready() || !gameplay_scene() || mmx4_coop_projected() ||
        mmx4_coop_alive(0) || !mmx4_coop_alive(1))return 0;
     /* Original 8002166C updates exactly 32 native stage/script actors from
      * 80142F98, stride 0x30. It never runs a player, projectile, or enemy
@@ -896,7 +907,7 @@ static int shared_ride_ready(CPUState *cpu,uint32_t address) {
     return mmx4_coop_finish(cpu,0);
 }
 static int script_text(CPUState *cpu,uint32_t address) {
-    if(text_guard || !mmx4_coop_ready() || mmx4_coop_projected() ||
+    if(text_guard || !mmx4_coop_ready() || !gameplay_scene() || mmx4_coop_projected() ||
        !script_active || script_owner!=1)return 0;
     uint8_t pad[6];read_bytes(PAD,pad,sizeof pad);
     for(unsigned index=0;index<3;++index)psx_mod_write_half(PAD+index*2u,story_pad[index]);
@@ -906,8 +917,24 @@ static int script_text(CPUState *cpu,uint32_t address) {
     psx_mod_counter_add("mmx4.coop.p2-dialogue-ticks",1);
     return mmx4_coop_finish(cpu,result);
 }
+static int shared_text_init(CPUState *cpu,uint32_t address) {
+    if(text_init_guard || !mmx4_coop_ready() || !mmx4_coop_projected())return 0;
+    /* Native8002217C saves/replaces the shared textbox CLUT at palette+2A0,
+     * requests its upload, and binds the campaign's script resources. These
+     * must survive leaving the actor projection. Subsequent text input still
+     * belongs to the seat that committed the scene. A story pass can keep
+     * PLAY+43 canonical while PLAYER+2 names P2; preserve that distinction. */
+    uint8_t story_campaign=psx_mod_read_byte(PLAY+0x43);
+    psx_mod_write_byte(PLAY+0x43,psx_mod_read_byte(PLAYER+2));
+    mmx4_coop_leave_second();text_init_guard=1;
+    uint32_t result=mmx4_coop_call(cpu,address,cpu->gpr[4],cpu->gpr[5]);
+    text_init_guard=0;mmx4_coop_enter_second();
+    psx_mod_write_byte(PLAY+0x43,story_campaign);
+    psx_mod_counter_add("mmx4.coop.canonical-dialogue-init",1);
+    return mmx4_coop_finish(cpu,result);
+}
 static int scene_actor_canonical(CPUState *cpu,uint32_t address) {
-    if(scene_guard || !mmx4_coop_ready() || mmx4_coop_projected())return 0;
+    if(scene_guard || !mmx4_coop_ready() || !gameplay_scene() || mmx4_coop_projected())return 0;
     uint32_t actor=cpu->gpr[4];unsigned owner=0;
     SceneOwner *record=scene_record(actor,0);
     if(psx_mod_read_byte(actor+4)==0 && record) {
@@ -982,7 +1009,7 @@ static int scene_actor(CPUState *cpu,uint32_t address) {
     return mmx4_coop_combat_canonical_call(cpu,address,scene_actor_canonical);
 }
 static int script_command(CPUState *cpu,uint32_t address) {
-    if(command_guard || !mmx4_coop_ready())return 0;
+    if(command_guard || !mmx4_coop_ready() || !gameplay_scene())return 0;
     unsigned owner=mmx4_coop_projected()?1u:0u;
     unsigned redirect=!owner && !mmx4_coop_alive(0) && mmx4_coop_alive(1);
     if(redirect) {mmx4_coop_enter_second();owner=1;}
@@ -1066,6 +1093,7 @@ uint32_t mmx4_coop_lifecycle_digest(uint32_t seed) {
     seed=hash_word(seed,menu_previous[0]);seed=hash_word(seed,menu_previous[1]);
     for(unsigned i=0;i<3;++i)seed=hash_word(seed,story_pad[i]);
     seed=hash_word(seed,carry_resources);seed=hash_word(seed,carry_dead);
+    seed=hash_word(seed,carry_refill);
     seed=hash_word(seed,carry_first_dead);
     seed=hash_word(seed,carry_departure);
     seed=hash_word(seed,script_active);seed=hash_word(seed,script_owner);
@@ -1105,6 +1133,7 @@ PSX_MOD_CONSTRUCTOR(mmx4_register_coop_lifecycle) {
     psx_mod_register_function_filter_plugin(ID,0x8002166Cu,stage_scripts);
     psx_mod_register_function_filter_plugin(ID,0x8002AD7Cu,shared_ride_ready);
     psx_mod_register_function_filter_plugin(ID,0x80021D20u,script_text);
+    psx_mod_register_function_filter_plugin(ID,0x8002217Cu,shared_text_init);
     psx_mod_register_function_filter_plugin(ID,0x800C2BE0u,scene_actor);
     psx_mod_register_function_filter_plugin(ID,0x800C1994u,scene_actor);
     psx_mod_register_function_filter_plugin(ID,0x800BD654u,scene_actor);
