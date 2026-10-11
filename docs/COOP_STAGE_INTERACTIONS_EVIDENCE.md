@@ -8,77 +8,91 @@ included. Native runtime qualification is separate from this trace.
 
 Slash Beast's native introduction `8006DC24` sets the foreground camera's
 authored room bounds. Those limits do not stop the train's separate scenery
-animation. The stage 8 entries in the first background mode table
-`800F32D4` select mode 5, whose callback `800285E0` does nothing. This stage
-therefore relies on shared actors to update the background origins.
+animation. Stage 8's first background mode table `800F32D4` selects mode 5,
+whose callback `800285E0` does nothing. Shared actors advance the scenery.
 
-The real online Split qualification QA79 disproved the initial actor mapping:
-saved view 0 advanced by 8/4 pixels per tick, while view 1 remained at
-background X3408/1448. Both players were healthy and idle after P2's Slash
-entry; both foreground cameras stayed near X9392/Y208. The earlier wrappers
-for small-pool types 24/25/26 modeled other native scenery actors, and did
-not cover this train loop. Passing those models did not qualify item 28.
+Real online Split qualification QA79 showed saved view 0 advancing 8/4 pixels
+per tick while view 1 remained at X3408/1448. Both players were healthy and
+idle after P2's Slash entry, and both foreground cameras stayed near
+X9392/Y208. Initial wrappers for types 24/25/26 did not cover that movement.
+A second revision identified the right native function entries but used the
+wrong pool range and type numbering. QA85 still froze view 1 at X3312/1400;
+all 20 inspected records in that assumed pool were empty. Passing the source
+models had not established the real callback's guest address.
 
-The 20-slot small actor pool starts at `801410C0`, stride `60` hex. Its native
-update `8002196C` dispatches through `800F2A68`. The original executable's
-relevant entries are:
+The original executable proves two overlapping dispatch tables with distinct
+pools. Address construction below uses the exact signed `addiu` immediates:
 
-| Type | Native update | Background behavior |
+| Native loop | Actor range | Slots/stride | Dispatch base |
+| --- | --- | --- | --- |
+| `8002196C` | `801410C0` through `8014183F` | 20 / `60` hex | `800F2A68` |
+| `80021A20` | `801435B0` through `801441AF` | 32 / `60` hex | `800F2A70` |
+
+At `80021A28`, `LUI 8014 + ADDIU 35B0` produces `801435B0`.
+The loop's end is base + `C00`, and `80021B08` advances by `60`.
+Allocator `8002B008` scans this same 32-slot range; `8002B088` instead scans
+the empty 20-slot range. The dispatch table starts eight bytes later, so the
+live train kinds are 17 and 19, rather than the first pool's 19 and 21.
+
+| Live type | Native update | Background behavior |
 | --- | --- | --- |
-| 19 | `800D8648`, active callback `800D872C` | Initializes actor `+18` to `00080000`; adds that speed to background 1 X at `800D878C` and its arithmetic half to background 2 X at `800D87A8`. |
-| 21 | `800D9218`, active callback `800D9330` | Initializes the same speed; adds it to background 1 X at `800D9388` and its arithmetic half to background 2 X at `800D93A4`. The outer update also calls `800D9B48` to advance boss-phase layer metadata. |
+| 17 | `800D8648`, active `800D872C` | Initializes actor `+18` to `00080000`; adds that speed to background 1 X at `800D878C` and its arithmetic half to background 2 X at `800D87A8`. |
+| 19 | `800D9218`, active `800D9330` | Initializes the same speed; adds it to background 1 X at `800D9388` and its arithmetic half to background 2 X at `800D93A4`. The outer update also calls `800D9B48` for boss-phase layer metadata. |
 
-These original top-level entries dispatch the active callbacks normally.
-Additional active-function hooks are unnecessary for the observed coverage
-gap. The main gameplay routine `80021158` updates the foreground camera,
-then the two background helpers. The shared small actor pool also runs from
-`80021104` after that gameplay step. Consequently these actors write scenery
-after the co-op view snapshots. Calling the mode 5 helper for the other pane
-cannot recreate that external movement.
+These top-level entries dispatch active callbacks normally. Native
+`80021158` calls the live scenery pool `80021A20` at `800211B0`, before
+foreground `80027850` at `800211D8` and background helpers
+`80027D40`/`800281E8`. Only the empty 20-slot pool `8002196C` runs after
+the gameplay step from `80021104`. The mode 5 helper cannot recreate either
+pool's external world motion in the other pane.
 
-Type 21's native region selector `800D993C` uses player X thresholds
-5808/7648/9984/10000 and resets subphases when the region changes. Its earlier
-phase 1 calls the full helper `800D964C` from `800D9480` only at subphase
-`+6 == 2`. If `+7 != 0` and `PLAYER+BC == 0`, that helper additionally adds
-`current_foreground_X - previous_foreground_X` to background 1 and an
-arithmetic half to background 2. Its stopped-train `+7 == 0` branch either
+Live type 19's region selector `800D993C` uses player X thresholds
+5808/7648/9984/10000 and resets subphases when the region changes. Earlier
+phase 1 calls full helper `800D964C` from `800D9480` only at `+6 == 2`.
+If `+7 != 0` and `PLAYER+BC == 0`, it adds
+`current_foreground_X - previous_foreground_X` to background 1 and its
+arithmetic half to background 2. The stopped-train `+7 == 0` branch instead
 decelerates or sets `+7 = 1` and shared limits; that transition tick adds no
-foreground displacement. Testing only the resulting actor flags would
-incorrectly apply parallax on the transition.
+foreground displacement. Observing only the resulting flags would invent
+parallax on that transition.
 
-The revised Split adapter wraps types 19/21 once and records the actual
-foreground branch by intercepting full native helper `800D964C` during that
-outer call. It applies captured background deltas to both saved cameras,
-without adding them to canonical RAM again. Only the other view's recorded
-foreground contribution is replaced with that pane's own preceding motion.
-Arithmetic half preserves native `sra` behavior for negative odd fixed units.
+The revised Split adapter accepts only the exact live 32-slot pool and
+types 17/19, wraps each native update once, and observes the actual foreground
+branch by intercepting `800D964C` during the outer call. Captured background
+deltas reach both saved cameras without being added to canonical RAM again.
+The current owner's later snapshot captures canonical motion once; the other
+pane's mode 5 update preserves its already-applied delta. Only the other
+view's foreground contribution is replaced with its own recorded movement.
+Arithmetic half preserves native `sra` for negative odd fixed units.
 Changed authored limits, dead zones, shake and layer metadata are copied;
-foreground current/previous origins remain private. The adapter does not
-repeat shared actor effects, particles, story commands or animation updates.
-Unified mode, private player projection and local drawing bypass it.
-Section reset starts both snapshots from the new native origins.
+foreground current/previous origins stay private. Shared actor effects,
+particles, story commands and animation updates still run once. Unified,
+private player projection and local drawing bypass the adapter. Section reset
+starts both snapshots from the new native origins.
 
-The replacement model cases use the actual 8/4-pixel loop and native type 21
-phase dispatch. They cover distinct pane origins, single original execution,
-later camera snapshots, owner switches, opposite fractional movement,
-native freeze gates, the stopped-train transition, region reset, initialization
-metadata, modular uint32 origin arithmetic, shared scenes, cleanup, wrong
-actor kind, projection, section reset, local drawing, another stage and
-Unified. This revision has source inspection and a clean whitespace diff;
-root owns compilation, model execution and repeat online native qualification.
+Focused models now dispatch the real 32-slot pool in the native order before
+foreground/background snapshots. They exercise the first slot `801435B0`,
+last slot `80144150`, and rejection of the old pool, below-base, end and
+misaligned records. Cases also cover the 8/4-pixel loop, distinct pane origins,
+single original execution, later snapshots, owner switches, opposite fractional
+movement, freeze gates, the stopped transition, region reset, initialization
+metadata, uint32 origin wrap, shared scenes, cleanup, wrong kind, projection,
+reset, local drawing, another stage and Unified. This revision has source
+inspection and a clean whitespace diff; root owns model execution and native
+raster/CRC qualification. Item 28 remains open.
 
-Native qualification uses a real healthy connected two-peer Split match:
+Native qualification requires a healthy connected two-peer Split match:
 load stage 8, section 1, checkpoint 3; place both players at X9360/Y395 and
-use native Right input to cross X9472 with either leading seat while the
-other remains at X9360. After the warning/introduction, keep both living
-players stationary and compare completed-frame captures over several seconds.
-Both saved scenery panes must advance while the authored foreground stays
-inside its boss limits. Record all active small-pool actors' bytes
-`0/1/4/5/6/7/14` and word `18` to identify the actual train callback and phase.
-Inspect canonical backgrounds at layer bases `80141A04` and `80141A58`,
-current X/Y at `+8/+C`, previous X/Y at `+14/+18`, and saved camera state
-reported by `mmx4.coop.split-state`. Repeat for both leading seats and
-campaign rosters; verify matching deterministic state on both peers.
+use native Right to cross X9472 with either leading seat while the other
+remains at X9360. After the warning/introduction, keep both living players
+stationary and compare completed-frame captures over several seconds. Both
+saved scenery panes must advance while foreground remains inside its boss
+limits. Record the 32 live actors at `801435B0 + slot*60`: bytes
+`0/1/4/5/6/7/14` and word `18`, especially types 17/19. Inspect canonical
+backgrounds at `80141A04` and `80141A58`, current X/Y at `+8/+C`,
+previous X/Y at `+14/+18`, and the saved camera state published by
+`mmx4.coop.split-state`. Repeat both leading seats and campaign rosters;
+verify matching deterministic state on both peers.
 
 ## Lightning Web wall-jump anchors — feedback item 22
 

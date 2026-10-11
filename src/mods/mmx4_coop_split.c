@@ -5,6 +5,9 @@
 #define COOP_ID "mmx4.coop"
 #define CAMERA 0x801419B0u
 #define CAMERA_BYTES 0xFCu
+#define TRAIN_POOL 0x801435B0u
+#define TRAIN_SLOTS 32u
+#define TRAIN_ACTOR_BYTES 0x60u
 #define VISITS_OFFSET (16u+2u*CAMERA_BYTES)
 #define STATE_BYTES (VISITS_OFFSET+MMX4_COOP_PLACEMENTS/8u)
 
@@ -100,10 +103,11 @@ static int train_foreground(CPUState *cpu,uint32_t address) {
 }
 static int train_background(CPUState *cpu,uint32_t address) {
     uint32_t actor=cpu->gpr[4];
-    unsigned kind=address==0x800D8648u?19u:21u;
+    unsigned kind=address==0x800D8648u?17u:19u;
     if(background_call || !available() || mmx4_coop_projected() ||
-       psx_mod_read_byte(MMX4_PLAY+12)!=8 || actor<0x801410C0u ||
-       actor>=0x80141840u || (actor-0x801410C0u)%0x60u ||
+       psx_mod_read_byte(MMX4_PLAY+12)!=8 || actor<TRAIN_POOL ||
+       actor>=TRAIN_POOL+TRAIN_SLOTS*TRAIN_ACTOR_BYTES ||
+       (actor-TRAIN_POOL)%TRAIN_ACTOR_BYTES ||
        psx_mod_read_byte(actor+1)!=kind)return 0;
     initialize_cameras();
     uint8_t before[CAMERA_BYTES],after[CAMERA_BYTES];
@@ -113,10 +117,12 @@ static int train_background(CPUState *cpu,uint32_t address) {
     read_bytes(CAMERA,after,CAMERA_BYTES);
     unsigned previous=psx_mod_read_word(state+8u);
     unsigned owner=previous?previous-1u:0u;
-    /* The train's mode5 layer helpers are no-ops. These original shared
-     * actors change the backgrounds after the player camera snapshots.
+    /* Native80021A20: 32x60 actors at801435B0, table800F2A70. Unlike the
+     * empty20 pool at801410C0/table800F2A68, its types are shifted by two.
+     * The train's mode5 helpers cannot recreate these shared actor writes.
+     * They run before the current player camera snapshot in80021158.
      * Apply their writes to both saved views, never to canonical RAM again.
-     * 19/21 add +18 speed and its arithmetic half. Only type21's inspected
+     * 17/19 add +18 speed and its arithmetic half. Only D9218's inspected
      * 800D964C branch also adds foreground motion; replace that contribution
      * with the other view's own displacement when the branch actually runs. */
     for(unsigned seat=0;seat<2;++seat) {
