@@ -5,8 +5,26 @@ are built from the same approved source and pinned framework/UI/network
 dependencies. There are no gameplay changes after playtest4. The owner
 confirmed the opening-stage paired arrival in the current Windows development
 build and authorized publication. Public builds disable both private debug
-options; packaged validation and final artifact provenance are recorded below
-when complete.
+options. Both builds passed all18 title CTests. The actual Windows package
+and Linux AppImage passed hidden launcher TCP checks; inspected images show
+the Netplay entry and Player2 controller page on both platforms. Package
+layout/seeding and Windows system-only import checks pass. The public
+production profile and native room offers match across platforms; this is
+compatibility qualification, not a real WAN gameplay test.
+
+Runtime source: `07a7a06792b714b86a5f46a6ccbec68c97b00c49`, framework
+`4b96c039`, UI `7ca30e31`, nested network `bb6a616c`. Later documentation
+updates do not change the compiled runtime. Production profile:
+`mmx4-coop-delay-v3:699b3da293fe4e12194a6379a869262dc137eb64`.
+
+| Asset | SHA256 |
+| --- | --- |
+| Windows ZIP | `ac682fac513aa57532add88a725893d34e0203ab7a545edff53936ba24524418` |
+| Linux x86_64 AppImage | `526911704e6801cda2a49197eafef75c17d6410445340c3913ae360f1a0c24de` |
+
+The AppImage requires glibc2.38 or newer. Final public files and combined
+checksums are staged under `dist/playtest5-public`; private source archives,
+cards, diagnostics and captures are excluded.
 
 Unified and Stacked remain defaults; online Split stays experimental. The
 original 28 feedback entries are qualified. Split Mushroom's elevator is the
