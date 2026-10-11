@@ -1,16 +1,18 @@
-# Co-op playtest 4 candidate
+# Co-op playtest 4
 
-Version: `v0.1.1-coop-playtest.4`. The next planned artifact is a Linux
-x86_64 AppImage. The owner is validating the current Windows development
-build; a new Windows release package has not been prepared.
+Version: `v0.1.1-coop-playtest.4`. This release supplies a Linux x86_64
+AppImage. Windows gameplay was validated using the current development
+build; no Windows package rebuild was requested for this release.
 
 Current changes are summarized in [release notes](../RELEASE_NOTES.md).
 The stable [October 10 checklist](COOP_PLAYTEST_FEEDBACK_20261010.md) records
 the 28 reports separately; all entries are checked. All 18 title checks pass,
 and QA88 qualifies both Split scenery panes with either leading seat and
-matching peer state checks through tick8672. The public Linux rebuild/package
-checks are pending; prior release fingerprints and artifact hashes below remain
-historical evidence.
+matching peer state checks through tick8672. The public Linux build also passes
+all 18 checks and AppImage layout/reseeding tests. Hidden production launcher
+TCP smoke tests exercise the rendered Netplay button, two-player input model
+and Player 2 controller page. It requires glibc2.38 or newer. Prior release
+fingerprints and artifact hashes below remain historical evidence.
 
 Unified and Stacked remain defaults; Split remains experimental. The native
 Windows/Linux lobby, two local controller assignments, Side by side HUD
@@ -23,7 +25,11 @@ Prepare a fresh private Linux source snapshot with
 After the production rebuild, use
 [package_native_appimage.sh](../tools/package_native_appimage.sh) and
 [test_appimage_layout.sh](../tools/test_appimage_layout.sh). Final execution,
-compatibility and artifact hashes must come from that candidate.
+compatibility and artifact hashes must come from that candidate. The qualified
+runtime was compiled from committed source `d54daed`, framework `4b96c039`,
+UI `7ca30e31` and nested network `bb6a616c`; later release-note updates do not
+change those runtime sources. WSL builds use Linux-only PATH and
+`PSX_PYTHON=/usr/bin/python3` to avoid Windows Python shims during shader builds.
 
 ## Previous co-op playtest 3
 

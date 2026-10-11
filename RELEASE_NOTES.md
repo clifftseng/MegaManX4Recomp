@@ -1,8 +1,7 @@
 # Mega Man X4 Recompiled — v0.1.1-coop-playtest.4
 
-Next co-op playtest candidate. A Linux AppImage is planned; the owner is
-testing the current Windows development build. Unified remains the default,
-and Split cameras remain experimental.
+Linux AppImage co-op regression release, with the gameplay fixes validated
+on Windows. Unified remains the default, and Split cameras remain experimental.
 
 - Netplay hosting starts the game with the selected BIOS, fixing the white
   screen after Play. Shared launcher and network dependencies are updated.
@@ -24,8 +23,10 @@ The stable [October 10 checklist](docs/COOP_PLAYTEST_FEEDBACK_20261010.md)
 tracks all 28 reports and their individual evidence; all entries are checked.
 All 18 title checks pass. Native two-peer Split tests cover either player
 leading into Slash Beast's fight, with matching state checks through tick8672.
-The public Linux rebuild and package checks are still pending. These tests
-cover the reported cases rather than complete campaigns or production FPS.
+The Linux production build also passes all 18 checks, AppImage layout/seeding,
+and hidden launcher TCP smoke tests of the real Netplay button and two-player
+controls. Private development controls are disabled. These tests cover the
+reported cases rather than complete campaigns or production FPS.
 
 The Windows/Linux launcher retains its two-player lobby and two independent
 local controller assignments. Stacked HUD remains the default, with Side by
