@@ -6,92 +6,103 @@ included. Native runtime qualification is separate from this trace.
 
 ## Military Train background updates — feedback item 28
 
-Slash Beast's native introduction `8006DC24` sets the foreground camera's
-authored room bounds. Those limits do not stop the train's separate scenery
-animation. Stage 8's first background mode table `800F32D4` selects mode 5,
-whose callback `800285E0` does nothing. Shared actors advance the scenery.
+Slash Beast's native introduction `8006DC24` sets authored foreground room
+bounds. Those bounds do not stop the separate train scenery animation.
+Stage 8's first background mode table `800F32D4` selects mode 5, whose
+callback `800285E0` does nothing. Shared actors advance the scenery.
 
-Real online Split qualification QA79 showed saved view 0 advancing 8/4 pixels
-per tick while view 1 remained at X3408/1448. Both players were healthy and
-idle after P2's Slash entry, and both foreground cameras stayed near
-X9392/Y208. Initial wrappers for types 24/25/26 did not cover that movement.
-A second revision identified the right native function entries but used the
-wrong pool range and type numbering. QA85 still froze view 1 at X3312/1400;
-all 20 inspected records in that assumed pool were empty. Passing the source
-models had not established the real callback's guest address.
+Real online Split qualifications QA79/85/86 kept reproducing the other pane's
+frozen background while the canonical pane advanced 8/4 pixels per tick.
+Both players were healthy and idle after P2's Slash entry. Earlier models
+matched native function arithmetic but assumed the wrong physical actor
+pool and kind numbering: neither the 20-slot `801410C0` pool nor the
+32-slot `801435B0` pool contained the live boss scenery actor. Those
+inferred pool gates rejected the actual callback, so their passing models
+did not establish the requested native behavior.
 
-The original executable proves two overlapping dispatch tables with distinct
-pools. Address construction below uses the exact signed `addiu` immediates:
+QA87 supplies the decisive original callback/write trace. Repeated
+`800D9218` entries have `a0 = 80169CB8` and `ra = 80021BDC`; the dispatch
+table register is `s1 = 800F2AB4`. Native background writes at `800D9388`
+and `800D93A4` use `s0 = 80169CB8` and advance background 1/2 by exactly
+8/4 pixels. `800D8648` and `800D964C` are absent during this idle boss
+loop. The trace is retained privately in
+`qa-real-split-train-trace-87/train-background/native-traces.json`.
 
-| Native loop | Actor range | Slots/stride | Dispatch base |
-| --- | --- | --- | --- |
-| `8002196C` | `801410C0` through `8014183F` | 20 / `60` hex | `800F2A68` |
-| `80021A20` | `801435B0` through `801441AF` | 32 / `60` hex | `800F2A70` |
+The original executable independently agrees with every traced address:
 
-At `80021A28`, `LUI 8014 + ADDIU 35B0` produces `801435B0`.
-The loop's end is base + `C00`, and `80021B08` advances by `60`.
-Allocator `8002B008` scans this same 32-slot range; `8002B088` instead scans
-the empty 20-slot range. The dispatch table starts eight bytes later, so the
-live train kinds are 17 and 19, rather than the first pool's 19 and 21.
-
-| Live type | Native update | Background behavior |
+| Contract | Original instruction evidence | Result |
 | --- | --- | --- |
-| 17 | `800D8648`, active `800D872C` | Initializes actor `+18` to `00080000`; adds that speed to background 1 X at `800D878C` and its arithmetic half to background 2 X at `800D87A8`. |
-| 19 | `800D9218`, active `800D9330` | Initializes the same speed; adds it to background 1 X at `800D9388` and its arithmetic half to background 2 X at `800D93A4`. The outer update also calls `800D9B48` for boss-phase layer metadata. |
+| Pool base | `80021B38`: LUI `8017`; `80021B3C`: ADDIU `-6348` hex | `80169CB8` |
+| Pool end | `80021B40` adds `C0`; `80021BE4` constructs `80170000 - 6288` | `80169D78` exclusive |
+| Slot stride | `80021BE8` adds `30` | Four `30`-byte records; last slot `80169D48` |
+| Table | `80021B60/64` construct `800F2AB4` | Kind 0 → `800D8648`; kind 2 → `800D9218` |
+| Original caller | `80021BD4` executes JALR | Return PC `80021BDC`, matching QA87 |
+| Matching allocator | `8002B048` constructs the same base, adds `C0`, advances `30` | Same four-slot pool |
 
-These top-level entries dispatch active callbacks normally. Native
-`80021158` calls the live scenery pool `80021A20` at `800211B0`, before
-foreground `80027850` at `800211D8` and background helpers
-`80027D40`/`800281E8`. Only the empty 20-slot pool `8002196C` runs after
-the gameplay step from `80021104`. The mode 5 helper cannot recreate either
-pool's external world motion in the other pane.
+The signed low immediate matters: `80170000 - 6348 = 80169CB8`.
+The native dispatcher `80021B34` has a different pool/table from
+`8002196C` and `80021A20`. The latter two loops cannot identify the
+callback merely because their overlapping tables also contain `800D9218`.
 
-Live type 19's region selector `800D993C` uses player X thresholds
+| Live scenery kind | Native update | Background behavior |
+| --- | --- | --- |
+| 0 | `800D8648`, active `800D872C` | Initializes actor `+18` to `00080000`; adds that speed to background 1 X at `800D878C` and its arithmetic half to background 2 X at `800D87A8`. |
+| 2 | `800D9218`, active `800D9330` | Initializes the same speed; adds it to background 1 X at `800D9388` and its arithmetic half to background 2 X at `800D93A4`. The outer update also calls `800D9B48` for boss-phase layer metadata. |
+
+Native `80021158` calls foreground `80027850` at `800211D8`, background
+helpers `80027D40`/`800281E8` at `800211E0/E8`, then the actual scenery
+pool `80021B34` at `800211F0`. This ordering agrees with QA87's writes:
+the background camera write at `80028238` precedes the train actor writes.
+Thus live scenery runs after co-op camera snapshots; calling the mode 5
+helper for the other pane cannot recreate those external world deltas.
+
+Kind 2's region selector `800D993C` uses player X thresholds
 5808/7648/9984/10000 and resets subphases when the region changes. Earlier
 phase 1 calls full helper `800D964C` from `800D9480` only at `+6 == 2`.
 If `+7 != 0` and `PLAYER+BC == 0`, it adds
 `current_foreground_X - previous_foreground_X` to background 1 and its
 arithmetic half to background 2. The stopped-train `+7 == 0` branch instead
 decelerates or sets `+7 = 1` and shared limits; that transition tick adds no
-foreground displacement. Observing only the resulting flags would invent
-parallax on that transition.
+foreground displacement. This earlier-phase helper is additional original
+static evidence, separate from the directly observed idle boss loop.
 
-The revised Split adapter accepts only the exact live 32-slot pool and
-types 17/19, wraps each native update once, and observes the actual foreground
-branch by intercepting `800D964C` during the outer call. Captured background
-deltas reach both saved cameras without being added to canonical RAM again.
-The current owner's later snapshot captures canonical motion once; the other
-pane's mode 5 update preserves its already-applied delta. Only the other
-view's foreground contribution is replaced with its own recorded movement.
-Arithmetic half preserves native `sra` for negative odd fixed units.
-Changed authored limits, dead zones, shake and layer metadata are copied;
-foreground current/previous origins stay private. Shared actor effects,
-particles, story commands and animation updates still run once. Unified,
-private player projection and local drawing bypass the adapter. Section reset
-starts both snapshots from the new native origins.
+The revised Split adapter accepts only the trace-corroborated four-slot
+pool and kinds 0/2. It calls each original update once and propagates captured
+background deltas to both saved cameras without adding them to canonical
+RAM again. Where native `800D964C` actually runs its foreground branch, the
+other pane receives its own recorded foreground contribution instead of the
+canonical contribution. Arithmetic half preserves native `sra` for negative
+odd fixed units. Changed authored limits, dead zones, shake and layer metadata
+are copied; foreground current/previous origins remain private. Shared actor
+effects, particles, story commands and animation updates still run once.
+Unified, player projection and local drawing bypass the adapter. Section
+reset starts both snapshots from the new native origins.
 
-Focused models now dispatch the real 32-slot pool in the native order before
-foreground/background snapshots. They exercise the first slot `801435B0`,
-last slot `80144150`, and rejection of the old pool, below-base, end and
-misaligned records. Cases also cover the 8/4-pixel loop, distinct pane origins,
-single original execution, later snapshots, owner switches, opposite fractional
-movement, freeze gates, the stopped transition, region reset, initialization
-metadata, uint32 origin wrap, shared scenes, cleanup, wrong kind, projection,
-reset, local drawing, another stage and Unified. This revision has source
-inspection and a clean whitespace diff; root owns model execution and native
-raster/CRC qualification. Item 28 remains open.
+Focused models now use the actual four-slot table and exact QA87 base-slot
+kind 2 callback. Foreground/background camera snapshots precede shared pool
+dispatch. They require one original 8/4-pixel update, absence of `800D964C`
+during the idle loop, both panes advancing, and no second addition on the
+next frame. First/last slots and rejection of both previously inferred pools,
+below-base, exclusive-end and misaligned records are covered. Existing cases
+retain independent origins, owner switches, fractional movement, freeze
+gates, stopping transition, region reset, initialization metadata, uint32 wrap,
+shared scenes, cleanup, wrong kind, projection, reset, local drawing, another
+stage and Unified. This revision has source inspection and a clean whitespace
+diff. Root owns model execution and repeat native raster/CRC qualification;
+item 28 remains open until that requested behavior is validated.
 
 Native qualification requires a healthy connected two-peer Split match:
 load stage 8, section 1, checkpoint 3; place both players at X9360/Y395 and
 use native Right to cross X9472 with either leading seat while the other
 remains at X9360. After the warning/introduction, keep both living players
 stationary and compare completed-frame captures over several seconds. Both
-saved scenery panes must advance while foreground remains inside its boss
-limits. Record the 32 live actors at `801435B0 + slot*60`: bytes
-`0/1/4/5/6/7/14` and word `18`, especially types 17/19. Inspect canonical
-backgrounds at `80141A04` and `80141A58`, current X/Y at `+8/+C`,
-previous X/Y at `+14/+18`, and the saved camera state published by
-`mmx4.coop.split-state`. Repeat both leading seats and campaign rosters;
+saved scenery panes must advance while foreground stays inside boss limits.
+Read four records at `80169CB8 + slot*30`, especially the observed base-slot
+kind 2: bytes `0/1/4/5/6/7/14` and word `18`. Inspect canonical backgrounds
+`80141A04` and `80141A58`, current X/Y at `+8/+C`, previous X/Y at
+`+14/+18`, and the saved camera state published by `mmx4.coop.split-state`.
+The `mmx4.coop.split-train-background-ticks` counter should advance during
+the observed original loop. Repeat both leading seats and campaign rosters;
 verify matching deterministic state on both peers.
 
 ## Lightning Web wall-jump anchors — feedback item 22

@@ -215,10 +215,10 @@ class Probe:
                                  for layer in range(3)] for seat in range(2)]
                 rows.append(row)
                 if len(rows) == 1:
-                    actors=self.r.read(0x801435B0,32*0x60)
+                    actors=self.r.read(0x80169CB8,4*0x30)
                     row['native_background_actors']=[dict(slot=i,type=p[1],state=list(p[4:8]),
                         timer=p[0x14],speed=hex(word(p,0x18)))
-                        for i in range(32) for p in [actors[i*0x60:(i+1)*0x60]] if p[0]]
+                        for i in range(4) for p in [actors[i*0x30:(i+1)*0x30]] if p[0]]
                     self.capture('train-background-before-' + str(owner), row)
                 time.sleep(.04)
             self.capture('train-background-after-' + str(owner), rows[-1])

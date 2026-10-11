@@ -82,6 +82,9 @@ def main():
             runtime=NetplayRuntime(debug)
             output=args.output/'train-background';output.mkdir()
             probe=Probe(runtime,output,args.campaign)
+            trace_targets=(0x800D8648,0x800D9218,0x800D964C,0x80021A20,0x8002196C)
+            for target in trace_targets:peers[0].request('fntrace_arm',target=hex(target))
+            peers[0].request('wtrace_arm',lo='0x801419B0',hi='0x80141AAC')
             try:
                 for owner in (1,0):
                     probe.train_background(owner,2)
@@ -97,6 +100,12 @@ def main():
                     exercise.checkpoint('native Slash backgrounds owner '+str(owner),tick,min_digests=2)
             finally:
                 runtime.release()
+                traces={hex(target):peers[0].request('fntrace_dump',
+                    target_lo=hex(target),target_hi=hex(target+4),count=128)
+                    for target in trace_targets}
+                traces['camera_writes']=peers[0].request('wtrace_dump',count=128,newest=1,
+                    addr_lo='0x80141A04',addr_hi='0x80141AAC')
+                (output/'native-traces.json').write_text(json.dumps(traces,indent=2))
                 (output/'stage-interactions.json').write_text(json.dumps(
                     dict(cases=probe.cases,events=probe.events),indent=2))
             report.update(status='passed',train_background_owners=2)
