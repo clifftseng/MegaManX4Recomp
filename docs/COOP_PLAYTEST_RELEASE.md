@@ -6,9 +6,11 @@ build; a new Windows release package has not been prepared.
 
 Current changes are summarized in [release notes](../RELEASE_NOTES.md).
 The stable [October 10 checklist](COOP_PLAYTEST_FEEDBACK_20261010.md) records
-the 28 reports separately. Split train scenery (item28), connected Split
-gameplay qualification and the public Linux rebuild/package checks are pending;
-prior release fingerprints and artifact hashes below remain historical evidence.
+the 28 reports separately; all entries are checked. All 18 title checks pass,
+and QA88 qualifies both Split scenery panes with either leading seat and
+matching peer state checks through tick8672. The public Linux rebuild/package
+checks are pending; prior release fingerprints and artifact hashes below remain
+historical evidence.
 
 Unified and Stacked remain defaults; Split remains experimental. The native
 Windows/Linux lobby, two local controller assignments, Side by side HUD

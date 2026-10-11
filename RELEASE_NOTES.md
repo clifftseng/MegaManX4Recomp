@@ -4,8 +4,8 @@ Next co-op playtest candidate. A Linux AppImage is planned; the owner is
 testing the current Windows development build. Unified remains the default,
 and Split cameras remain experimental.
 
-- Lobby Play carries the settled BIOS selection into startup. Updated shared
-  launcher and network dependencies retain the ICE and host handoffs.
+- Netplay hosting starts the game with the selected BIOS, fixing the white
+  screen after Play. Shared launcher and network dependencies are updated.
 - Both players use paired native arrivals for stage entry, forward sections
   and team retry. Cyber Peacock course portals return living players to safe
   native landings; boss approaches preserve the surviving player's controls.
@@ -18,13 +18,14 @@ and Split cameras remain experimental.
   cleared portraits retain that progress through Quit and Escape Device returns.
 - A surviving P2 can continue native stage transitions after P1 dies.
 - Zero can use the partner's Lightning Web as a native wall-jump anchor.
-- Split train scenery correction remains pending native qualification.
+- Both Split views keep the train scenery moving during Slash Beast's fight.
 
 The stable [October 10 checklist](docs/COOP_PLAYTEST_FEEDBACK_20261010.md)
-tracks all 28 reports and their individual evidence. The train scenery report
-remains open; this candidate does not claim all 28 are complete. Current title
-checks pass, while the connected Split qualification and public Linux rebuild/package
-checks are still pending.
+tracks all 28 reports and their individual evidence; all entries are checked.
+All 18 title checks pass. Native two-peer Split tests cover either player
+leading into Slash Beast's fight, with matching state checks through tick8672.
+The public Linux rebuild and package checks are still pending. These tests
+cover the reported cases rather than complete campaigns or production FPS.
 
 The Windows/Linux launcher retains its two-player lobby and two independent
 local controller assignments. Stacked HUD remains the default, with Side by

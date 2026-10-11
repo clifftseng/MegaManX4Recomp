@@ -211,3 +211,20 @@ host input layer. A both-player teleport uses one fixture 4/seat 2 command.
 Direct RAM writes and other raw mutation requests are rejected. Its eight
 offline fake-peer tests verify routing and completed-body reads, with sockets
 prohibited; live Split/native CRC and visual qualification remain with root.
+
+
+Root native QA88 qualifies the corrected range using two connected hidden
+peers with real Split rendering and synchronized development fixtures.
+The live base-slot actor is type2, state[1,5,0,0], speed00080000. Original
+Slash entry is exercised with each leading seat. During two-second idle
+windows, both saved scenery panes advance equally: BG1/BG2 +496/+248px
+for owner1 and +464/+232px for owner0, while foreground X changes0px.
+Both peers' before/after screenshots show the moving train structures.
+Core/mod CRC samples match after each qualification, through tick8672.
+All18 title CTests pass. This corrects the reproduced Split scenery freeze;
+it does not claim complete campaign or production/display FPS coverage.
+
+Native Zero wall-jump qualifications QA76/77 also pass in both player
+arrangements. A real X Lightning Web is fired with native controller input;
+Zero enters action10 and moves upward and away from the contacted anchor.
+Those cases qualify the enhancement, beyond model-only contact fields.
