@@ -1,4 +1,19 @@
-# Co-op playtest 4
+# Co-op playtest 5
+
+Version: `v0.1.1-coop-playtest.5`. Windows ZIP and Linux x86_64 AppImage
+are built from the same approved source and pinned framework/UI/network
+dependencies. There are no gameplay changes after playtest4. The owner
+confirmed the opening-stage paired arrival in the current Windows development
+build and authorized publication. Public builds disable both private debug
+options; packaged validation and final artifact provenance are recorded below
+when complete.
+
+Unified and Stacked remain defaults; online Split stays experimental. The
+original 28 feedback entries are qualified. Split Mushroom's elevator is the
+later, open item29; WAN play, intermittent retry/menu disconnects and broader
+Split performance remain open qualification/investigation areas.
+
+## Previous co-op playtest 4
 
 Version: `v0.1.1-coop-playtest.4`. This release supplies a Linux x86_64
 AppImage. Windows gameplay was validated using the current development
@@ -6,7 +21,7 @@ build; no Windows package rebuild was requested for this release.
 
 Current changes are summarized in [release notes](../RELEASE_NOTES.md).
 The stable [October 10 checklist](COOP_PLAYTEST_FEEDBACK_20261010.md) records
-the 28 reports separately; all entries are checked. All 18 title checks pass,
+the original 28 reports separately; those entries are checked. All 18 title checks pass,
 and QA88 qualifies both Split scenery panes with either leading seat and
 matching peer state checks through tick8672. The public Linux build also passes
 all 18 checks and AppImage layout/reseeding tests. Hidden production launcher
