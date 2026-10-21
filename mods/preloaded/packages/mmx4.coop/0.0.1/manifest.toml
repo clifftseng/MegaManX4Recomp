@@ -78,7 +78,7 @@ label = "Both players"
 feature = "coop"
 id = "extra_players"
 label = "Extra local players (Experimental)"
-description = "Add Player 3 and Player 4 as extra copies of Player 2's hero, each on their own controller (assign them in Controls). Local Unified co-op only: ignored for netplay and split views. Save states and rewind are unavailable while extra players are active. Extra players stay near the team, respawn beside Player 1 a few seconds after falling, and do not count toward team survival. Requires a fresh boot."
+description = "Add Player 3 and Player 4, each on their own controller and with their own hero, armor and colors (assign them in Controls). Local Unified co-op only: ignored for netplay and split views. Save states and rewind are unavailable while extra players are active. Extra players stay near the team, respawn beside Player 1 a few seconds after falling, and do not count toward team survival. Requires a fresh boot."
 type = "choice"
 default = "0"
 [[option.choice]]
@@ -149,6 +149,79 @@ label = "Gold"
 value = "black"
 label = "Black (Zero only; others keep original colors)"
 
+[[option]]
+feature = "coop"
+id = "p3_hero"
+label = "Player 3 hero"
+description = "Same as Player 2, or a specific hero. Player 3 may play the same hero as Player 1."
+type = "choice"
+default = "partner"
+[[option.choice]]
+value = "partner"
+label = "Same as Player 2"
+[[option.choice]]
+value = "x"
+label = "X"
+[[option.choice]]
+value = "zero"
+label = "Zero"
+
+[[option]]
+feature = "coop"
+id = "p3_armor"
+label = "Player 3 armor (X only)"
+description = "Follow the campaign's armor parts, wear none, wear all four Force Armor parts, or wear Ultimate Armor for this player only. Has no effect on Zero."
+type = "choice"
+default = "campaign"
+[[option.choice]]
+value = "campaign"
+label = "Follow the campaign"
+[[option.choice]]
+value = "none"
+label = "No armor"
+[[option.choice]]
+value = "force"
+label = "Force Armor (all parts)"
+[[option.choice]]
+value = "ultimate"
+label = "Ultimate Armor"
+
+[[option]]
+feature = "coop"
+id = "p4_hero"
+label = "Player 4 hero"
+description = "Same as Player 2, or a specific hero. Player 4 may play the same hero as Player 1."
+type = "choice"
+default = "partner"
+[[option.choice]]
+value = "partner"
+label = "Same as Player 2"
+[[option.choice]]
+value = "x"
+label = "X"
+[[option.choice]]
+value = "zero"
+label = "Zero"
+
+[[option]]
+feature = "coop"
+id = "p4_armor"
+label = "Player 4 armor (X only)"
+description = "Follow the campaign's armor parts, wear none, wear all four Force Armor parts, or wear Ultimate Armor for this player only. Has no effect on Zero."
+type = "choice"
+default = "campaign"
+[[option.choice]]
+value = "campaign"
+label = "Follow the campaign"
+[[option.choice]]
+value = "none"
+label = "No armor"
+[[option.choice]]
+value = "force"
+label = "Force Armor (all parts)"
+[[option.choice]]
+value = "ultimate"
+label = "Ultimate Armor"
 [[plugin]]
 feature = "coop"
 id = "mmx4.coop"

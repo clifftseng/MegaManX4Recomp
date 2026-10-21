@@ -201,9 +201,11 @@ static void inventory_write(const Inventory *in) {
 void mmx4_coop_lifecycle_project(void) {
     if(inventory_projected)return;
     inventory_read(&saved_inventory);
-    if(!inventory_initialized || second_inventory.character!=(saved_inventory.character^1u)) {
+    /* The slot's hero: P2 is P1's counterpart; a bench seat may be either. */
+    unsigned character=mmx4_coop_slot_character();
+    if(!inventory_initialized || second_inventory.character!=character) {
         memset(&second_inventory,0,sizeof second_inventory);
-        second_inventory.character=(uint8_t)(saved_inventory.character^1u);
+        second_inventory.character=(uint8_t)character;
         second_inventory.hp=psx_mod_read_byte(PLAY+0x46);
         memset(second_inventory.ammo,48,sizeof second_inventory.ammo);
         memcpy(second_inventory.etanks,saved_inventory.etanks,2);

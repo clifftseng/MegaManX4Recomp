@@ -88,12 +88,24 @@ typedef struct {
     Mmx4CoopSeatInventory inventory;
     uint16_t previous_input;
     unsigned enrolled,tint,respawn;
+    /* Hero (0 X, 1 Zero). Swapped with `counterpart` while in the slot.
+     * hero_choice: 0 same as P2, 1 X, 2 Zero. */
+    unsigned hero,hero_choice;
+    unsigned armor;
 } BenchSeat;
 static BenchSeat bench[MMX4_COOP_BENCH_SEATS];
-static unsigned bench_count,slot_seat=1,slot_tint;
+static unsigned bench_count,slot_seat=1,slot_tint,slot_armor,slot_ultimate;
 static uint32_t bench_palettes,bench_hud_arena,slot_palette;
+/* One private Ultimate Armor X body/assembly/colour set for bench seats, so a
+ * single seat can wear it while every other X keeps the shared variant. */
+static uint32_t ultimate_sprites,ultimate_assembly,ultimate_colors;
+#define ULTIMATE_SET_BYTES 0x41000u /* body 0x34000 + assembly 0xC000 + colours 0x1000 */
+static unsigned ultimate_projected;
 #define BENCH_RESPAWN_TICKS 180u
 #define BENCH_TINT_BLACK 6u
+/* X armour per bench seat: follow the campaign, none, all four Force Armor
+ * parts, or Ultimate Armor (private sprite set + upgrade byte). */
+enum {BENCH_ARMOR_CAMPAIGN,BENCH_ARMOR_NONE,BENCH_ARMOR_FORCE,BENCH_ARMOR_ULTIMATE};
 #ifdef MMX4_COOP_NETPLAY_DEBUG
 static Mmx4DebugDecoder development_decoder;
 #endif
@@ -212,6 +224,7 @@ static int prepare_ultimate_archive(void) {
     u->loaded=1;return 1;
 }
 static const Mmx4Asset *character_compressed(unsigned character) {
+    if(character==0 && slot_ultimate)return &ultimate_archive.compressed;
     return character==0 && x_variant?&ultimate_archive.compressed:&assets[character].compressed;
 }
 static void select_x_variant(unsigned ultimate) {
@@ -270,20 +283,31 @@ static int load_character(unsigned character) {
     return character<2 && prepare_character(0,0) && prepare_character(1,0) &&
         prepare_ultimate_archive() && prepare_character(character,1);
 }
+static uint32_t slot_sprites(unsigned character);
+static uint32_t slot_assembly(unsigned character);
 static void enter_second(void) {
     projected=1;
     /* P2 follows the one campaign's permanent progress. Its native X body
      * consumes armor bytes; Zero keeps its own character-specific fields. */
     mmx4_coop_lifecycle_follow_progress(second.body,counterpart);
+    /* A bench X may override that with its own armour: A7 is the Force Armor
+     * part mask, B8 the capsule upgrade (2 = Ultimate, as the QA fixture). */
+    if(slot_armor!=BENCH_ARMOR_CAMPAIGN) {
+        second.body[0xA7]=slot_armor==BENCH_ARMOR_NONE?0:15;
+        second.body[0xB8]=slot_armor==BENCH_ARMOR_ULTIMATE?2:0;
+    }
     capture_player(&first);project_player(&second);
     mmx4_coop_lifecycle_project();
     /* PLAY+37 is the one native campaign code flag. Only P1 owns its saved
      * value; P2's character code comes solely from agreed active options. */
     saved_cheat=psx_mod_read_byte(PLAY+0x37);
-    psx_mod_write_byte(PLAY+0x37,(uint8_t)mmx4_cheats_character_enabled(counterpart));
+    psx_mod_write_byte(PLAY+0x37,(uint8_t)(slot_ultimate ||
+        mmx4_cheats_character_enabled(counterpart)));
     CharacterAssets *a=&assets[counterpart];
     uint32_t palette=slot_palette?slot_palette:a->palette;
-    uint32_t values[9]={a->sprites,a->assembly,a->colors,palette,a->menu[0],a->menu[1],a->menu[2],a->menu[3],a->menu[4]};
+    uint32_t colors=slot_ultimate?ultimate_colors:a->colors;
+    uint32_t values[9]={slot_sprites(counterpart),slot_assembly(counterpart),colors,palette,
+        a->menu[0],a->menu[1],a->menu[2],a->menu[3],a->menu[4]};
     for(unsigned i=0;i<9;++i) {saved_resources[i]=psx_mod_read_word(SCRATCH+resource_offsets[i]);psx_mod_write_word(SCRATCH+resource_offsets[i],values[i]);}
     saved_dirty=psx_mod_read_byte(0x80166BB0);
 }
@@ -305,8 +329,20 @@ static void bench_swap(unsigned e) {
     PlayerContext held=second;second=b->player;b->player=held;
     uint16_t input=previous_input;previous_input=b->previous_input;b->previous_input=input;
     mmx4_coop_lifecycle_swap_inventory(&b->inventory);
-    if(slot_seat==1) {slot_seat=2+e;slot_palette=bench_palettes+e*0x1000u;slot_tint=b->tint;}
-    else {slot_seat=1;slot_palette=0;slot_tint=0;}
+    unsigned hero=counterpart;counterpart=b->hero;b->hero=hero;
+    if(slot_seat==1) {
+        slot_seat=2+e;slot_palette=bench_palettes+e*0x1000u;slot_tint=b->tint;
+        slot_armor=counterpart==0?b->armor:BENCH_ARMOR_CAMPAIGN;
+        slot_ultimate=slot_armor==BENCH_ARMOR_ULTIMATE && ultimate_sprites;
+    }else {slot_seat=1;slot_palette=0;slot_tint=slot_armor=slot_ultimate=0;}
+}
+unsigned mmx4_coop_slot_character(void) {return counterpart;}
+/* Sprite source of `character` for whoever occupies the slot right now. */
+static uint32_t slot_sprites(unsigned character) {
+    return !character && slot_ultimate?ultimate_sprites:assets[character].sprites;
+}
+static uint32_t slot_assembly(unsigned character) {
+    return !character && slot_ultimate?ultimate_assembly:assets[character].assembly;
 }
 /* Presentation-only recolour of one 15-bit colour; 0 stays transparent. */
 static uint16_t bench_tint(uint16_t color,unsigned tint) {
@@ -424,15 +460,26 @@ static int retained_upload(CPUState *cpu,uint32_t address) {
     (void)address;
     if(upload_guard)return 0;
     uint32_t source=cpu->gpr[5],rect=cpu->gpr[4];
-    unsigned owner=2;
+    /* Character sets, bench palettes and the bench Ultimate set all live in
+     * retained (Expansion 1) memory. */
+    uint32_t region=0,region_size=0;
     for(unsigned i=0;i<2;++i)
-        if(source>=assets[i].sprites && source-assets[i].sprites<0x60000u)owner=i;
-    if(owner==2)return 0;
+        if(source>=assets[i].sprites && source-assets[i].sprites<0x60000u) {
+            region=assets[i].sprites;region_size=0x60000u;
+        }
+    if(bench_palettes && source>=bench_palettes &&
+       source-bench_palettes<MMX4_COOP_BENCH_SEATS*0x1000u) {
+        region=bench_palettes;region_size=MMX4_COOP_BENCH_SEATS*0x1000u;
+    }
+    if(ultimate_sprites && source>=ultimate_sprites && source-ultimate_sprites<ULTIMATE_SET_BYTES) {
+        region=ultimate_sprites;region_size=ULTIMATE_SET_BYTES;
+    }
+    if(!region_size)return 0;
     uint32_t x=psx_mod_read_half(rect),y=psx_mod_read_half(rect+2);
     uint32_t w=psx_mod_read_half(rect+4),h=psx_mod_read_half(rect+6);
-    uint32_t words=(w*h+1u)/2u,offset=source-assets[owner].sprites;
+    uint32_t words=(w*h+1u)/2u,offset=source-region;
     if(!w || w>1024 || !h || h>512 || x>=1024 || y>=512 ||
-       (source&3u) || words>(0x60000u-offset)/4u) {
+       (source&3u) || words>(region_size-offset)/4u) {
         failed=9;return mmx4_coop_finish(cpu,(uint32_t)-1);
     }
     upload_guard=1;guest(cpu,0x800EA20C,0,0);
@@ -606,16 +653,32 @@ static void spawn_slot(CPUState *cpu,uint32_t ahead) {
     psx_mod_write_byte(0x80141A48u,camera_enabled[1]);
     psx_mod_write_byte(0x80141A9Cu,camera_enabled[2]);
 }
+/* Copy the Ultimate Armor X body/assembly/colours into the bench seats'
+ * private set once per activation, from the user's verified PL02 archive. */
+static int project_ultimate_set(void) {
+    if(ultimate_projected)return 1;
+    if(!ultimate_sprites || !prepare_ultimate_archive())return 0;
+    const XArchive *u=&ultimate_archive;
+    project(ultimate_sprites,u->compressed.data,u->compressed.size);
+    project(ultimate_assembly,u->assembly.data,u->assembly.size);
+    project(ultimate_colors,u->colors.data,u->colors.size);
+    ultimate_projected=1;return 1;
+}
 /* Enroll (or respawn) bench seats next to a living P1, each with a private
- * copy of the counterpart's current stage palette. */
+ * copy of its hero's current stage palette. */
 static void enroll_bench(CPUState *cpu,int respawn_only) {
     if(!enrolled || failed || !mmx4_coop_alive(0))return;
     for(unsigned e=0;e<bench_count;++e) {
         BenchSeat *b=&bench[e];
         if(respawn_only && (!b->enrolled || bench_alive(e) || ++b->respawn<BENCH_RESPAWN_TICKS))continue;
         if(!respawn_only && b->enrolled)continue;
+        b->hero=b->hero_choice?b->hero_choice-1u:counterpart;
+        /* A seat playing P1's hero needs that hero's stage colours too. Both
+         * character sets were initialized by P2's enrollment. */
+        if(b->hero!=counterpart && !load_stage_palette(b->hero))continue;
+        if(b->hero==0 && b->armor==BENCH_ARMOR_ULTIMATE && !project_ultimate_set())continue;
         uint8_t palette[0x1000];
-        capture(assets[counterpart].palette,palette,sizeof palette);
+        capture(assets[b->hero].palette,palette,sizeof palette);
         memset(&b->player,0,sizeof b->player);b->previous_input=0;b->respawn=0;
         b->inventory.initialized=0;
         bench_swap(e);
@@ -1030,15 +1093,19 @@ static uint32_t character_palette(unsigned character) {
     return slot_palette?slot_palette:assets[character].palette;
 }
 static int decode_bank(const SpriteBank *bank,uint8_t decoded[32768]) {
-    if(!bank->tiles || bank->tiles>256 || bank->variant>2)return 0;
+    /* Variants: 0 X, 1 Ultimate X (shared), 2 Zero, 3 a bench seat's
+     * private Ultimate X copy. */
+    if(!bank->tiles || bank->tiles>256 || bank->variant>3)return 0;
     unsigned character=bank->variant==2;
     const CharacterAssets *a=&assets[character];
-    const Mmx4Asset *body=bank->variant==1?&ultimate_archive.compressed:&a->compressed;
-    if(!a->loaded || (bank->variant==1 && !ultimate_archive.loaded) ||
-       bank->source<a->sprites || bank->source-a->sprites>=body->size)return 0;
+    unsigned ultimate=bank->variant==1 || bank->variant==3;
+    const Mmx4Asset *body=ultimate?&ultimate_archive.compressed:&a->compressed;
+    uint32_t sprites=bank->variant==3?ultimate_sprites:a->sprites;
+    if(!a->loaded || (ultimate && !ultimate_archive.loaded) || !sprites ||
+       bank->source<sprites || bank->source-sprites>=body->size)return 0;
     size_t written=0;
-    return mmx4_coop_decode_sprite(body->data+bank->source-a->sprites,
-        body->size-(bank->source-a->sprites),decoded,32768,&written) &&
+    return mmx4_coop_decode_sprite(body->data+bank->source-sprites,
+        body->size-(bank->source-sprites),decoded,32768,&written) &&
         written==(size_t)bank->tiles*128u;
 }
 static int define_sprite_bank(const SpriteBank *bank) {
@@ -1063,15 +1130,16 @@ static int define_sprite_bank(const SpriteBank *bank) {
 static uint16_t sprite_bank(unsigned character,uint32_t table,unsigned frame,uint16_t clut,uint16_t tile) {
     unsigned *count=psx_mod_local_view_scope()?&view_bank_count:&bank_count;
     SpriteBank *cache=psx_mod_local_view_scope()?view_banks:banks;
-    CharacterAssets *a=&assets[character];uint8_t colors[32];
-    unsigned variant=character?2u:x_variant;
+    uint8_t colors[32];
+    unsigned variant=character?2u:slot_ultimate?3u:x_variant;
     const Mmx4Asset *body=character_compressed(character);
-    if(table<a->sprites || table-a->sprites>=body->size || clut>=0x8000)return 0;
-    size_t offset=table-a->sprites;
+    uint32_t sprites=slot_sprites(character);
+    if(table<sprites || table-sprites>=body->size || clut>=0x8000)return 0;
+    size_t offset=table-sprites;
     if(frame*4+4>body->size-offset)return 0;
     uint32_t packed=le32(body->data+offset+frame*4),source=table+(packed&0xFFFFF);
     unsigned tiles=packed>>20;
-    if(!tiles || tiles>256 || source<a->sprites || source-a->sprites>=body->size)return 0;
+    if(!tiles || tiles>256 || source<sprites || source-sprites>=body->size)return 0;
     int palette_offset=mmx4_coop_character_palette_offset(clut);
     if(palette_offset>=0) {
         capture(character_palette(character)+(uint32_t)palette_offset,colors,sizeof colors);
@@ -1260,12 +1328,12 @@ static void render_actor(CPUState *cpu,uint32_t actor,uint32_t base,unsigned cha
     uint32_t parent_assembly=primary || projected?psx_mod_read_word(PLAYER+0x3C):le32(second.body+0x3C);
     if(!raw_graphics && !table && psx_mod_read_word(actor+0x3C)==parent_assembly)
         table=primary || projected?psx_mod_read_word(PLAYER+0x38):le32(second.body+0x38);
-    CharacterAssets *a=&assets[character];
     const Mmx4Asset *body=character_compressed(character);
+    uint32_t sprites=slot_sprites(character);
     uint32_t native_sprites=psx_mod_read_word(SCRATCH+0x14);
     if(!raw_graphics && primary && table>=native_sprites && table-native_sprites<body->size)
-        table=a->sprites+(table-native_sprites);
-    int compressed=!raw_graphics && table>=a->sprites && table-a->sprites<body->size;
+        table=sprites+(table-native_sprites);
+    int compressed=!raw_graphics && table>=sprites && table-sprites<body->size;
     /* Native 80024420/800244E8 adds the actor's VRAM allocation to each
      * assembly tile. Private decoded banks start at tile zero instead.
      * Weapons commonly occupy 0520/0530/0540 rather than the body's 0500;
@@ -1290,7 +1358,7 @@ static void render_actor(CPUState *cpu,uint32_t actor,uint32_t base,unsigned cha
     uint32_t end=psx_mod_read_word(SCRATCH+0x100);
     if(end<start || end-base>packet_limit() || (end-start)%40) { failed=4;return; }
     uint32_t assembly=psx_mod_read_word(actor+0x3C);
-    uint32_t assembly_base=primary?psx_mod_read_word(SCRATCH+0x1C):a->assembly;
+    uint32_t assembly_base=primary?psx_mod_read_word(SCRATCH+0x1C):slot_assembly(character);
     if(!compressed && (assembly<assembly_base || assembly-assembly_base>=0xC000))return;
     uint32_t expanded=base+packet_limit()+(start-base)*2;
     for(uint32_t at=start;at<end;at+=40,expanded+=80,mode+=8) {
@@ -1808,10 +1876,20 @@ static void activate(void) {
     if(psx_mod_current_option_value("extra_players",extra,sizeof extra) && extra[0]>='1' &&
        extra[0]<='0'+(int)MMX4_COOP_BENCH_SEATS && !extra[1] && !split_views &&
        !psx_mod_netplay_is_active())bench_count=(unsigned)(extra[0]-'0');
+    static const char *const heroes[]={"partner","x","zero"};
+    static const char *const armors[]={"campaign","none","force","ultimate"};
+    unsigned wants_ultimate=0;
     for(unsigned e=0;e<bench_count;++e) {
         char id[16];snprintf(id,sizeof id,"p%u_colors",e+3);
         if(psx_mod_current_option_value(id,tint,sizeof tint))
             for(unsigned t=0;t<sizeof tints/sizeof tints[0];++t)if(!strcmp(tint,tints[t]))bench[e].tint=t;
+        snprintf(id,sizeof id,"p%u_hero",e+3);
+        if(psx_mod_current_option_value(id,tint,sizeof tint))
+            for(unsigned t=0;t<sizeof heroes/sizeof heroes[0];++t)if(!strcmp(tint,heroes[t]))bench[e].hero_choice=t;
+        snprintf(id,sizeof id,"p%u_armor",e+3);
+        if(psx_mod_current_option_value(id,tint,sizeof tint))
+            for(unsigned t=0;t<sizeof armors/sizeof armors[0];++t)if(!strcmp(tint,armors[t]))bench[e].armor=t;
+        wants_ultimate|=bench[e].armor==BENCH_ARMOR_ULTIMATE;
     }
     memset(&first,0,sizeof first);memset(&second,0,sizeof second);
     bank_count=ui_bank_count=inside=enrolled=failed=rendering=projected=camera_call=camera_update_call=hud_call=upload_guard=0;
@@ -1846,6 +1924,18 @@ static void activate(void) {
         bench_hud_arena=psx_mod_alloc_texture_packet_memory(2u*MMX4_COOP_BENCH_SEATS*0x8000u,16);
         if(!bench_palettes || !bench_hud_arena) {
             bench_count=0;psx_mod_counter_add("mmx4.coop.bench-allocation-refused",1);
+        }
+    }
+    ultimate_sprites=ultimate_assembly=ultimate_colors=0;ultimate_projected=0;
+    if(bench_count && wants_ultimate) {
+        ultimate_sprites=psx_mod_alloc_guest_memory(ULTIMATE_SET_BYTES,16);
+        if(ultimate_sprites) {
+            ultimate_assembly=ultimate_sprites+0x34000u;ultimate_colors=ultimate_sprites+0x40000u;
+        }else {
+            /* Without the private set, Ultimate seats fall back to Force Armor. */
+            for(unsigned e=0;e<bench_count;++e)
+                if(bench[e].armor==BENCH_ARMOR_ULTIMATE)bench[e].armor=BENCH_ARMOR_FORCE;
+            psx_mod_counter_add("mmx4.coop.bench-ultimate-refused",1);
         }
     }
     if(!mmx4_coop_audio_activate())failed=1;

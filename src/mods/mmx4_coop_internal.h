@@ -28,6 +28,8 @@ int mmx4_widescreen_snapshot(Mmx4SnapshotIO *s);
 #define MMX4_COOP_BENCH_SEATS 2u
 typedef struct { uint8_t bytes[32]; unsigned initialized; } Mmx4CoopSeatInventory;
 void mmx4_coop_lifecycle_swap_inventory(Mmx4CoopSeatInventory *seat);
+/* Hero (0 X, 1 Zero) of whoever occupies the private slot. */
+unsigned mmx4_coop_slot_character(void);
 #define MMX4_PLAYER 0x801418C8u
 #define MMX4_PLAY 0x801721C0u
 #define MMX4_VEHICLE 0x80173A30u
