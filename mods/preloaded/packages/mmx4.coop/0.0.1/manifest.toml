@@ -74,6 +74,81 @@ label = "Either player"
 value = "both"
 label = "Both players"
 
+[[option]]
+feature = "coop"
+id = "extra_players"
+label = "Extra local players (Experimental)"
+description = "Add Player 3 and Player 4 as extra copies of Player 2's hero, each on their own controller (assign them in Controls). Local Unified co-op only: ignored for netplay and split views. Save states and rewind are unavailable while extra players are active. Extra players stay near the team, respawn beside Player 1 a few seconds after falling, and do not count toward team survival. Requires a fresh boot."
+type = "choice"
+default = "0"
+[[option.choice]]
+value = "0"
+label = "None"
+[[option.choice]]
+value = "1"
+label = "Player 3"
+[[option.choice]]
+value = "2"
+label = "Players 3 and 4"
+
+[[option]]
+feature = "coop"
+id = "p3_colors"
+label = "Player 3 colors"
+description = "Recolor Player 3 so the copies are easy to tell apart. Presentation only."
+type = "choice"
+default = "swap"
+[[option.choice]]
+value = "original"
+label = "Original"
+[[option.choice]]
+value = "swap"
+label = "Swap red and blue"
+[[option.choice]]
+value = "rotate"
+label = "Rotate colors"
+[[option.choice]]
+value = "rotate_back"
+label = "Rotate colors (reverse)"
+[[option.choice]]
+value = "shadow"
+label = "Shadow"
+[[option.choice]]
+value = "gold"
+label = "Gold"
+[[option.choice]]
+value = "black"
+label = "Black (Zero only; others keep original colors)"
+
+[[option]]
+feature = "coop"
+id = "p4_colors"
+label = "Player 4 colors"
+description = "Recolor Player 4 so the copies are easy to tell apart. Presentation only."
+type = "choice"
+default = "gold"
+[[option.choice]]
+value = "original"
+label = "Original"
+[[option.choice]]
+value = "swap"
+label = "Swap red and blue"
+[[option.choice]]
+value = "rotate"
+label = "Rotate colors"
+[[option.choice]]
+value = "rotate_back"
+label = "Rotate colors (reverse)"
+[[option.choice]]
+value = "shadow"
+label = "Shadow"
+[[option.choice]]
+value = "gold"
+label = "Gold"
+[[option.choice]]
+value = "black"
+label = "Black (Zero only; others keep original colors)"
+
 [[plugin]]
 feature = "coop"
 id = "mmx4.coop"

@@ -79,6 +79,21 @@ static unsigned split_views;
 static unsigned local_split,local_aspect_set;
 static uint32_t fixture_sequence;
 static unsigned fixture_invulnerable;
+/* Local P3/P4. A benched seat swaps into `second` for its own native pass,
+ * render and HUD, then swaps back; P2 always occupies the slot otherwise.
+ * Each seat keeps a private copy of the counterpart palette (native weapon
+ * colour writes land there) plus an optional presentation-only tint. */
+typedef struct {
+    PlayerContext player;
+    Mmx4CoopSeatInventory inventory;
+    uint16_t previous_input;
+    unsigned enrolled,tint,respawn;
+} BenchSeat;
+static BenchSeat bench[MMX4_COOP_BENCH_SEATS];
+static unsigned bench_count,slot_seat=1,slot_tint;
+static uint32_t bench_palettes,bench_hud_arena,slot_palette;
+#define BENCH_RESPAWN_TICKS 180u
+#define BENCH_TINT_BLACK 6u
 #ifdef MMX4_COOP_NETPLAY_DEBUG
 static Mmx4DebugDecoder development_decoder;
 #endif
@@ -267,7 +282,8 @@ static void enter_second(void) {
     saved_cheat=psx_mod_read_byte(PLAY+0x37);
     psx_mod_write_byte(PLAY+0x37,(uint8_t)mmx4_cheats_character_enabled(counterpart));
     CharacterAssets *a=&assets[counterpart];
-    uint32_t values[9]={a->sprites,a->assembly,a->colors,a->palette,a->menu[0],a->menu[1],a->menu[2],a->menu[3],a->menu[4]};
+    uint32_t palette=slot_palette?slot_palette:a->palette;
+    uint32_t values[9]={a->sprites,a->assembly,a->colors,palette,a->menu[0],a->menu[1],a->menu[2],a->menu[3],a->menu[4]};
     for(unsigned i=0;i<9;++i) {saved_resources[i]=psx_mod_read_word(SCRATCH+resource_offsets[i]);psx_mod_write_word(SCRATCH+resource_offsets[i],values[i]);}
     saved_dirty=psx_mod_read_byte(0x80166BB0);
 }
@@ -283,6 +299,30 @@ static void leave_second(void) {
     projected=0;
     diagnostics();
 }
+static void bench_swap(unsigned e) {
+    /* Outside every projection: P2 <-> bench seat e in the private slot. */
+    BenchSeat *b=&bench[e];
+    PlayerContext held=second;second=b->player;b->player=held;
+    uint16_t input=previous_input;previous_input=b->previous_input;b->previous_input=input;
+    mmx4_coop_lifecycle_swap_inventory(&b->inventory);
+    if(slot_seat==1) {slot_seat=2+e;slot_palette=bench_palettes+e*0x1000u;slot_tint=b->tint;}
+    else {slot_seat=1;slot_palette=0;slot_tint=0;}
+}
+/* Presentation-only recolour of one 15-bit colour; 0 stays transparent. */
+static uint16_t bench_tint(uint16_t color,unsigned tint) {
+    unsigned r=color&31u,g=(color>>5)&31u,b=(color>>10)&31u,stp=color&0x8000u,t;
+    if(!(color&0x7FFFu))return color;
+    switch(tint) {
+    case 1: t=r;r=b;b=t;break;                     /* swap red/blue */
+    case 2: t=r;r=g;g=b;b=t;break;                 /* rotate channels */
+    case 3: t=b;b=g;g=r;r=t;break;                 /* rotate the other way */
+    case 4: r=r*2/5;g=g*2/5;b=b*3/5;break;         /* shadow */
+    case 5: t=(r*5+g*9+b*2)/16;r=t+(31-t)/3;g=t*4/5;b=t/4;break; /* gold */
+    default: return color;
+    }
+    color=(uint16_t)(r|(g<<5)|(b<<10));
+    return (uint16_t)((color?color:0x0421u)|stp);
+}
 int mmx4_coop_ready(void) { return enrolled && !failed; }
 int mmx4_coop_both_door_players(void) {return (int)boss_door_both;}
 uint32_t mmx4_coop_counterpart_story_text(void) {
@@ -290,7 +330,16 @@ uint32_t mmx4_coop_counterpart_story_text(void) {
 }
 int mmx4_coop_projected(void) { return (int)projected; }
 int mmx4_coop_split_views(void) { return (int)split_views; }
+static int body_alive(const uint8_t *body) {
+    return body[0] && (body[0x5C]&0x7F)>0 && body[4]<2;
+}
+/* Logical seats 2..3 are benched unless rotated into the private slot. */
+static int bench_alive(unsigned e) {
+    if(e>=bench_count || !bench[e].enrolled || !enrolled)return 0;
+    return slot_seat==2+e?body_alive(second.body):body_alive(bench[e].player.body);
+}
 int mmx4_coop_alive(unsigned seat) {
+    if(seat>=2)return bench_alive(seat-2);
     if(mmx4_coop_lifecycle_hidden(seat))return 0;
     if(seat && !enrolled)return 0;
     if((!seat && !projected) || (seat && projected))
@@ -331,8 +380,8 @@ int mmx4_coop_finish(CPUState *cpu,uint32_t result) {
     cpu->gpr[2]=result;return 1;
 }
 uint16_t mmx4_coop_input(unsigned seat) {
-    uint16_t raw=(uint16_t)~sio_get_pad_buttons_slot(seat);
-    if(seat && psx_mod_read_byte(diagnostic+0x20))raw=(uint16_t)~psx_mod_read_half(diagnostic+0x24);
+    uint16_t raw=(uint16_t)~sio_get_pad_buttons_slot((int)seat);
+    if(seat==1 && psx_mod_read_byte(diagnostic+0x20))raw=(uint16_t)~psx_mod_read_half(diagnostic+0x24);
     uint16_t buttons=(uint16_t)~raw;
     mmx4_diagnostics_resolve_input(seat,&buttons);
 #ifdef MMX4_COOP_NETPLAY_DEBUG
@@ -467,6 +516,12 @@ static void reset_player(CPUState *cpu,uint32_t address) {
     mmx4_coop_split_reset();
     menu_texture_owner=2;
     enrolled=0;memset(&second,0,sizeof second);previous_input=0;
+    /* A room/stage initialization re-enrolls bench seats beside P1. */
+    for(unsigned e=0;e<MMX4_COOP_BENCH_SEATS;++e) {
+        memset(&bench[e].player,0,sizeof bench[e].player);
+        bench[e].enrolled=bench[e].respawn=bench[e].previous_input=0;
+        bench[e].inventory.initialized=0;
+    }
     if(diagnostic)diagnostics();
 }
 static int load_stage_palette(unsigned character) {
@@ -481,6 +536,7 @@ static int load_stage_palette(unsigned character) {
     project(assets[character].palette,palette.data,palette.size);
     return 1;
 }
+static void spawn_slot(CPUState *cpu,uint32_t ahead);
 static int enroll(CPUState *cpu) {
     if(!psx_mod_texture_banks_supported())return 0;
     counterpart=psx_mod_read_byte(PLAYER+2)^1;
@@ -490,8 +546,16 @@ static int enroll(CPUState *cpu) {
         (psx_mod_read_byte(PLAY+0x37)!=0 || mmx4_cheats_character_enabled(0)):
         mmx4_cheats_character_enabled(0));
     if(counterpart>1 || !load_character(counterpart^1u) || !load_character(counterpart))return 0;
-    uint8_t play[0x64];
     if(!load_stage_palette(counterpart))return 0;
+    spawn_slot(cpu,0);
+    enrolled=1;
+    mmx4_coop_lifecycle_enrolled(cpu);
+    psx_mod_counter_add("mmx4.coop.enrolled",1);return 1;
+}
+/* Native-initialize whoever occupies the private slot beside P1. `ahead`
+ * spaces bench seats further along so the team does not spawn stacked. */
+static void spawn_slot(CPUState *cpu,uint32_t ahead) {
+    uint8_t play[0x64];
     capture(PLAY,play,sizeof play);
     uint32_t x=psx_mod_read_word(PLAYER+8),y=psx_mod_read_word(PLAYER+12);
     uint32_t first_box=psx_mod_read_word(PLAYER+0x68);
@@ -501,7 +565,7 @@ static int enroll(CPUState *cpu) {
      * Keep P1's actual camera state during either concurrent or late arrival. */
     uint8_t camera_enabled[3]={psx_mod_read_byte(0x801419F4u),
         psx_mod_read_byte(0x80141A48u),psx_mod_read_byte(0x80141A9Cu)};
-    uint32_t spawn_x=on_chaser && incoming?x-(32u<<16):x+(24u<<16);
+    uint32_t spawn_x=on_chaser && incoming?x-(32u<<16)-ahead:x+(24u<<16)+ahead;
     enter_second();psx_mod_write_byte(PLAY+0x43,(uint8_t)counterpart);
     psx_mod_write_byte(PLAY+0x1E,0);
     guest(cpu,0x80035240,0,0);
@@ -540,9 +604,31 @@ static int enroll(CPUState *cpu) {
     leave_second();project(PLAY,play,sizeof play);
     psx_mod_write_byte(0x801419F4u,camera_enabled[0]);
     psx_mod_write_byte(0x80141A48u,camera_enabled[1]);
-    psx_mod_write_byte(0x80141A9Cu,camera_enabled[2]);enrolled=1;
-    mmx4_coop_lifecycle_enrolled(cpu);
-    psx_mod_counter_add("mmx4.coop.enrolled",1);return 1;
+    psx_mod_write_byte(0x80141A9Cu,camera_enabled[2]);
+}
+/* Enroll (or respawn) bench seats next to a living P1, each with a private
+ * copy of the counterpart's current stage palette. */
+static void enroll_bench(CPUState *cpu,int respawn_only) {
+    if(!enrolled || failed || !mmx4_coop_alive(0))return;
+    for(unsigned e=0;e<bench_count;++e) {
+        BenchSeat *b=&bench[e];
+        if(respawn_only && (!b->enrolled || bench_alive(e) || ++b->respawn<BENCH_RESPAWN_TICKS))continue;
+        if(!respawn_only && b->enrolled)continue;
+        uint8_t palette[0x1000];
+        capture(assets[counterpart].palette,palette,sizeof palette);
+        memset(&b->player,0,sizeof b->player);b->previous_input=0;b->respawn=0;
+        b->inventory.initialized=0;
+        bench_swap(e);
+        project(slot_palette,palette,sizeof palette);
+        spawn_slot(cpu,(20u*(e+1u))<<16);
+        /* Zero's own black-code colours (character colour row 13), as the
+         * native code would install them, for this seat only. */
+        if(b->tint==BENCH_TINT_BLACK && counterpart==1)for(unsigned i=0;i<16;++i)
+            psx_mod_write_half(slot_palette+i*2,psx_mod_read_half(assets[1].colors+13*32+i*2));
+        bench_swap(e);
+        b->enrolled=1;
+        psx_mod_counter_add(respawn_only?"mmx4.coop.bench-respawns":"mmx4.coop.bench-enrolled",1);
+    }
 }
 static void second_tick(CPUState *cpu,uint32_t address) {
     (void)address;
@@ -586,6 +672,27 @@ static void second_tick(CPUState *cpu,uint32_t address) {
         if(own_camera)for(unsigned layer=0;layer<3;++layer)
             project(0x801419B0u+layer*0x54u+8u,camera_origins[layer],20);
         psx_mod_counter_add("mmx4.coop.player-ticks",1);
+        /* P3/P4: the same native pass, one seat at a time through the slot.
+         * P2's private floor-controller copies stay P2's own. */
+        if(bench_count) {
+            enroll_bench(cpu,0);enroll_bench(cpu,1);
+            for(unsigned e=0;e<bench_count;++e) {
+                if(!bench[e].enrolled)continue;
+                bench_swap(e);
+                uint16_t bench_raw=mmx4_coop_input(slot_seat);
+                enter_second();
+                psx_mod_write_half(PAD,bench_raw);psx_mod_write_half(PAD+2,previous_input);
+                psx_mod_write_half(PAD+4,(uint16_t)(bench_raw&~previous_input));previous_input=bench_raw;
+                guest(cpu,0x80035EF0,0,0);guest(cpu,0x80021C14,0,0);guest(cpu,0x800311EC,0,0);
+                guest(cpu,0x80021340,0,0);
+                guest(cpu,0x8002C614,PLAYER,0);
+                guest(cpu,0x80021D84,0,0);guest(cpu,0x80021CC8,0,0);
+                leave_second();
+                bench_swap(e);
+            }
+            project(PAD,input,sizeof input);
+            psx_mod_counter_add("mmx4.coop.bench-ticks",1);
+        }
     }
     diagnostics();inside=0;
 }
@@ -608,6 +715,14 @@ static int camera_target(CPUState *cpu,uint32_t address) {
      * Averaging a frozen partner would prevent that equality indefinitely. */
     int32_t target=owner==1 || !mmx4_coop_alive(0)?partner:
         (int32_t)(((int64_t)(int32_t)original+partner)/2);
+    /* Ordinary play centres on every living hero, P3/P4 included. */
+    if(owner<0 && mmx4_coop_alive(0)) {
+        int64_t sum=(int64_t)(int32_t)original+partner;unsigned count=2;
+        for(unsigned e=0;e<bench_count;++e)if(bench_alive(e)) {
+            sum+=(int32_t)le32(bench[e].player.body+axis);++count;
+        }
+        if(count>2)target=(int32_t)(sum/count);
+    }
     camera_call=1;psx_mod_write_word(PLAYER+axis,(uint32_t)target);
     uint32_t result=guest(cpu,address,cpu->gpr[4],cpu->gpr[5]);
     psx_mod_write_word(PLAYER+axis,original);camera_call=0;
@@ -629,6 +744,19 @@ static void constrain_team(CPUState *cpu,uint32_t address) {
             if((distance>0 && p<old_p) || (distance<0 && p>old_p))put32(second.body+8,(uint32_t)old_p);
         }
     }
+    /* P3/P4 stay within half a native screen of the P1/P2 centre, by the
+     * same rule: only this frame's outward step is undone. */
+    if(mmx4_coop_alive(0) && !psx_mod_read_byte(PLAYER+0xC5)) {
+        int64_t centre=(int32_t)psx_mod_read_word(PLAYER+8);
+        if(mmx4_coop_alive(1))centre=(centre+(int32_t)le32(second.body+8))/2;
+        for(unsigned e=0;e<bench_count;++e) {
+            uint8_t *body=bench[e].player.body;
+            if(!bench_alive(e) || body[0xC5])continue;
+            int32_t b=(int32_t)le32(body+8),old_b=(int32_t)le32(body+0x18);
+            int64_t distance=(int64_t)b-centre,limit=112*65536;
+            if((distance>limit && b>old_b) || (distance < -limit && b<old_b))put32(body+8,(uint32_t)old_b);
+        }
+    }
     /* Falling boss entries need the authored deeper floor. Scripted lifts
      * replace that limit with their higher destination before the camera
      * and riders get there; keep the current view's bottom during ascent. */
@@ -640,6 +768,10 @@ static void constrain_team(CPUState *cpu,uint32_t address) {
         if(mmx4_coop_alive(seat) && y-8>=bottom) {
             if(seat)second.body[0x5C]=0x80;else psx_mod_write_byte(PLAYER+0x5C,0x80);
         }
+    }
+    for(unsigned e=0;e<bench_count;++e) {
+        uint8_t *body=bench[e].player.body;
+        if(bench_alive(e) && (int16_t)(le32(body+12)>>16)-8>=bottom)body[0x5C]=0x80;
     }
 }
 static int camera_update(CPUState *cpu,uint32_t address) {
@@ -894,7 +1026,8 @@ static int development_fixture(CPUState *cpu,uint32_t address) {
 }
 
 static uint32_t character_palette(unsigned character) {
-    return character==counterpart?assets[character].palette:psx_mod_read_word(SCRATCH+0x28);
+    if(character!=counterpart)return psx_mod_read_word(SCRATCH+0x28);
+    return slot_palette?slot_palette:assets[character].palette;
 }
 static int decode_bank(const SpriteBank *bank,uint8_t decoded[32768]) {
     if(!bank->tiles || bank->tiles>256 || bank->variant>2)return 0;
@@ -951,6 +1084,10 @@ static uint16_t sprite_bank(unsigned character,uint32_t table,unsigned frame,uin
             uint16_t color=vram[(unsigned)clut*16+i];
             colors[i*2]=(uint8_t)color;colors[i*2+1]=(uint8_t)(color>>8);
         }
+    }
+    if(slot_tint && character==counterpart)for(unsigned i=0;i<16;++i) {
+        uint16_t color=bench_tint((uint16_t)(colors[i*2]|colors[i*2+1]<<8),slot_tint);
+        colors[i*2]=(uint8_t)color;colors[i*2+1]=(uint8_t)(color>>8);
     }
     for(unsigned i=0;i<*count;++i)if(cache[i].variant==variant && cache[i].source==source &&
         cache[i].tile==tile && !memcmp(cache[i].colors,colors,32))return cache[i].id;
@@ -1011,6 +1148,8 @@ static uint16_t ui_tile(unsigned character,uint16_t page,uint16_t clut,uint16_t 
     int palette_offset=mmx4_coop_character_palette_offset(clut);
     for(unsigned i=0;i<16;++i)colors[i]=private_colors && palette_offset>=0?
         psx_mod_read_half(character_palette(character)+(uint32_t)palette_offset+i*2):vram[cy*1024+cx+i];
+    if(slot_tint && private_colors && character==counterpart)
+        for(unsigned i=0;i<16;++i)colors[i]=bench_tint(colors[i],slot_tint);
     for(unsigned i=0;i<*count;++i) {
         UiBank *b=&cache[i];
         if(b->character==character && b->page==page && b->clut==clut && b->uv==uv && !memcmp(b->colors,colors,32))return b->id;
@@ -1037,6 +1176,7 @@ static int world_draw_visible(void) {
      * frontend backdrops; neither may inherit a partner world sprite. */
     return phase==0 || (phase==2 && psx_mod_read_byte(0x801754A5u)<5);
 }
+static void hud_slot(CPUState *cpu,int offset_x,int offset_y,uint32_t base);
 static int coop_hud(CPUState *cpu,uint32_t address) {
     if(hud_call || projected || !mmx4_coop_ready() || !world_draw_visible())return 0;
     if(psx_mod_read_byte(PLAY+1)==2)psx_mod_counter_add("mmx4.coop.pause-world-hud-draws",1);
@@ -1044,12 +1184,32 @@ static int coop_hud(CPUState *cpu,uint32_t address) {
     hud_call=1;uint32_t result=own_hud && local_view_seat?0:
         guest(cpu,address,cpu->gpr[4],cpu->gpr[5]);
     if(own_hud && !local_view_seat) {hud_call=0;return mmx4_coop_finish(cpu,result);}
-    if(psx_mod_read_byte(PLAY+0x1F) && second.body[0]) {
-        /* Both layouts share the native left anchor. Own-player Split views
-         * use the original position; Unified offsets only the second group. */
-        int offset_x=!own_hud && hud_side_by_side?56:0;
-        int offset_y=!own_hud && !hud_side_by_side?104:0;
-        uint32_t pools[3],base=hud_arena+(psx_mod_read_word(SCRATCH)&1u)*0x8000;
+    /* Both layouts share the native left anchor. Own-player Split views
+     * use the original position; Unified offsets only the second group. */
+    if(psx_mod_read_byte(PLAY+0x1F) && second.body[0])
+        hud_slot(cpu,!own_hud && hud_side_by_side?56:0,!own_hud && !hud_side_by_side?104:0,
+            hud_arena+(psx_mod_read_word(SCRATCH)&1u)*0x8000);
+    /* P3/P4 complete a 2x2 grid (Stacked) or continue the row (Side by side). */
+    if(psx_mod_read_byte(PLAY+0x1F) && !own_hud)
+        for(unsigned e=0;e<bench_count && !failed;++e) {
+            if(!bench[e].enrolled)continue;
+            bench_swap(e);
+            if(second.body[0])hud_slot(cpu,hud_side_by_side?56*(int)(e+2):56,
+                hud_side_by_side?0:104*(int)e,
+                bench_hud_arena+((psx_mod_read_word(SCRATCH)&1u)*MMX4_COOP_BENCH_SEATS+e)*0x8000u);
+            bench_swap(e);
+        }
+    if(own_hud && local_view_seat && psx_mod_read_byte(PLAY+0x1F) &&
+       psx_mod_read_byte(PLAY+0x24)) {
+        guest(cpu,0x800253F0u,psx_mod_read_word(PLAY+0x20),1);
+        guest(cpu,0x80025188u,7,(psx_mod_read_byte(PLAY+0x25)+0x57u)&255u);
+    }
+    hud_call=0;return mmx4_coop_finish(cpu,result);
+}
+/* The private slot's life/weapon meters, converted to retained UI banks. */
+static void hud_slot(CPUState *cpu,int offset_x,int offset_y,uint32_t base) {
+    {
+        uint32_t pools[3];
         for(unsigned i=0;i<3;++i) {pools[i]=psx_mod_read_word(SCRATCH+0x108+i*4);psx_mod_write_word(SCRATCH+0x108+i*4,base+i*0x1000);}
         enter_second();
         guest(cpu,0x800253F0,PLAYER,0);
@@ -1082,13 +1242,10 @@ static int coop_hud(CPUState *cpu,uint32_t address) {
         leave_second();
         for(unsigned i=0;i<3;++i)psx_mod_write_word(SCRATCH+0x108+i*4,pools[i]);
     }
-    if(own_hud && local_view_seat && psx_mod_read_byte(PLAY+0x1F) &&
-       psx_mod_read_byte(PLAY+0x24)) {
-        guest(cpu,0x800253F0u,psx_mod_read_word(PLAY+0x20),1);
-        guest(cpu,0x80025188u,7,(psx_mod_read_byte(PLAY+0x25)+0x57u)&255u);
-    }
-    hud_call=0;return mmx4_coop_finish(cpu,result);
 }
+/* Native packets per frame before the expanded (2x) area. Bench seats share
+ * the frame, so they double it; 80000+160000 still fits FRAME_ARENA. */
+static uint32_t packet_limit(void) {return bench_count?80000u:40000u;}
 static void render_actor(CPUState *cpu,uint32_t actor,uint32_t base,unsigned character) {
     if(mmx4_coop_split_sprite_outside(actor))return;
     uint32_t start=psx_mod_read_word(SCRATCH+0x100),mode=psx_mod_read_word(SCRATCH+0x104);
@@ -1131,11 +1288,11 @@ static void render_actor(CPUState *cpu,uint32_t actor,uint32_t base,unsigned cha
     }
     if(compressed)psx_mod_write_half(actor+0x40,tile_origin);
     uint32_t end=psx_mod_read_word(SCRATCH+0x100);
-    if(end<start || end-base>40000 || (end-start)%40) { failed=4;return; }
+    if(end<start || end-base>packet_limit() || (end-start)%40) { failed=4;return; }
     uint32_t assembly=psx_mod_read_word(actor+0x3C);
     uint32_t assembly_base=primary?psx_mod_read_word(SCRATCH+0x1C):a->assembly;
     if(!compressed && (assembly<assembly_base || assembly-assembly_base>=0xC000))return;
-    uint32_t expanded=base+40000+(start-base)*2;
+    uint32_t expanded=base+packet_limit()+(start-base)*2;
     for(uint32_t at=start;at<end;at+=40,expanded+=80,mode+=8) {
         uint32_t q[10];for(unsigned i=0;i<10;++i)q[i]=psx_mod_read_word(at+i*4);
         unsigned command=q[1]>>24;uint16_t tile=UINT16_MAX;
@@ -1190,14 +1347,27 @@ int mmx4_coop_render_rider_armor(CPUState *cpu,uint32_t address) {
        psx_mod_read_byte(PLAYER+0xC5)!=0xFF || psx_mod_read_byte(MMX4_VEHICLE+1)!=0)return 0;
     return render_native_rider_component(cpu,address);
 }
+static void render_slot(CPUState *cpu,uint32_t base,uint32_t start);
 static int render(CPUState *cpu,uint32_t address) {
     if(rendering || inside || projected || failed || !enrolled || !world_draw_visible())return 0;
     if(psx_mod_read_byte(PLAY+1)==2)psx_mod_counter_add("mmx4.coop.pause-world-player-draws",1);
     rendering=1;
     uint32_t result=guest(cpu,address,cpu->gpr[4],cpu->gpr[5]);
+    uint32_t base=arena+(psx_mod_read_word(SCRATCH)&1u)*FRAME_ARENA;
+    render_slot(cpu,base,base);
+    for(unsigned e=0;e<bench_count && !failed;++e) {
+        if(!bench[e].enrolled)continue;
+        bench_swap(e);render_slot(cpu,base,base+world_packet_used);bench_swap(e);
+    }
+    rendering=0;
+    return mmx4_coop_finish(cpu,result);
+}
+/* Draw the private slot's body, trails, glows, vehicle and shots into the
+ * private packet arena starting at `start`. */
+static void render_slot(CPUState *cpu,uint32_t base,uint32_t start) {
     enter_second();
-    uint32_t original=psx_mod_read_word(SCRATCH+0x100),base=arena+(psx_mod_read_word(SCRATCH)&1u)*FRAME_ARENA;
-    psx_mod_write_word(SCRATCH+0x100,base);
+    uint32_t original=psx_mod_read_word(SCRATCH+0x100);
+    psx_mod_write_word(SCRATCH+0x100,start);
     /* Ride Armor also uses C5=FF, but its odd bucket3 must remain behind
      * the native rider bucket2. Only Ride Chaser has the four-part ordering. */
     unsigned chaser=second.body[0xC5]==0xFF && second.vehicle[1]==0?2u:0u;
@@ -1215,8 +1385,7 @@ static int render(CPUState *cpu,uint32_t address) {
             chaser && psx_mod_read_byte(shot+1)==57?chaser:0u);
     }
     world_packet_used=psx_mod_read_word(SCRATCH+0x100)-base;
-    psx_mod_write_word(SCRATCH+0x100,original);leave_second();rendering=0;
-    return mmx4_coop_finish(cpu,result);
+    psx_mod_write_word(SCRATCH+0x100,original);leave_second();
 }
 static int render_owned_effect(CPUState *cpu,uint32_t address) {
     uint8_t assessment[0x60];
@@ -1631,6 +1800,19 @@ static void activate(void) {
      * view when no fresh private pair exists; never change the guest aspect. */
     psx_mod_set_local_pair_presentation(local_split);
     split_views=local_split || mmx4_coop_views_requested(psx_mod_netplay_is_active(),cameras);
+    /* P3/P4 are local Unified only: no private cameras, snapshots or netplay. */
+    char extra[8],tint[16];
+    static const char *const tints[]={"original","swap","rotate","rotate_back","shadow","gold","black"};
+    bench_count=0;slot_seat=1;slot_palette=slot_tint=0;
+    memset(bench,0,sizeof bench);
+    if(psx_mod_current_option_value("extra_players",extra,sizeof extra) && extra[0]>='1' &&
+       extra[0]<='0'+(int)MMX4_COOP_BENCH_SEATS && !extra[1] && !split_views &&
+       !psx_mod_netplay_is_active())bench_count=(unsigned)(extra[0]-'0');
+    for(unsigned e=0;e<bench_count;++e) {
+        char id[16];snprintf(id,sizeof id,"p%u_colors",e+3);
+        if(psx_mod_current_option_value(id,tint,sizeof tint))
+            for(unsigned t=0;t<sizeof tints/sizeof tints[0];++t)if(!strcmp(tint,tints[t]))bench[e].tint=t;
+    }
     memset(&first,0,sizeof first);memset(&second,0,sizeof second);
     bank_count=ui_bank_count=inside=enrolled=failed=rendering=projected=camera_call=camera_update_call=hud_call=upload_guard=0;
     traced_failure=0;
@@ -1658,6 +1840,14 @@ static void activate(void) {
     arena=psx_mod_alloc_texture_packet_memory(2*FRAME_ARENA,16);
     hud_arena=psx_mod_alloc_texture_packet_memory(0x10000,16);
     if(!diagnostic || !arena || !hud_arena)failed=1;
+    bench_palettes=bench_hud_arena=0;
+    if(bench_count) {
+        bench_palettes=psx_mod_alloc_guest_memory(MMX4_COOP_BENCH_SEATS*0x1000u,16);
+        bench_hud_arena=psx_mod_alloc_texture_packet_memory(2u*MMX4_COOP_BENCH_SEATS*0x8000u,16);
+        if(!bench_palettes || !bench_hud_arena) {
+            bench_count=0;psx_mod_counter_add("mmx4.coop.bench-allocation-refused",1);
+        }
+    }
     if(!mmx4_coop_audio_activate())failed=1;
     /* Host ARC/UI/SPU residency precedes a possible first-PC state load.
      * Guest character arrays are initialized only by normal native enrollment. */
@@ -1666,8 +1856,9 @@ static void activate(void) {
     psx_mod_set_texture_bank_resolver(resolve_texture_bank);
     /* The provider captures both native contexts and persistent ownership.
      * Online user state jumps remain outside the lockstep match protocol. */
-    psx_mod_set_rewind_blocked(psx_mod_netplay_is_active());
-    psx_mod_set_savestate_blocked(psx_mod_netplay_is_active());
+    psx_mod_set_rewind_blocked(psx_mod_netplay_is_active() || bench_count);
+    psx_mod_set_savestate_blocked(psx_mod_netplay_is_active() || bench_count);
+    if(bench_count)psx_mod_counter_add("mmx4.coop.bench-seats",bench_count);
     psx_mod_counter_add("mmx4.coop.activated",1);
     psx_mod_counter_add("mmx4.coop.diagnostic-address",diagnostic);
     if(diagnostic) {

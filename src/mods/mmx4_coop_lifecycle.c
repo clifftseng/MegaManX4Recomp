@@ -216,6 +216,17 @@ void mmx4_coop_lifecycle_restore(void) {
     inventory_read(&second_inventory);
     inventory_write(&saved_inventory);inventory_projected=0;
 }
+void mmx4_coop_lifecycle_swap_inventory(Mmx4CoopSeatInventory *seat) {
+    /* A bench seat's transient health/ammo/weapon/E-tank contents take P2's
+     * place while it occupies the private slot. Never during a projection. */
+    _Static_assert(sizeof(Inventory)<=sizeof seat->bytes,"bench inventory size");
+    if(inventory_projected)return;
+    Inventory held;unsigned initialized=seat->initialized;
+    memcpy(&held,seat->bytes,sizeof held);
+    memcpy(seat->bytes,&second_inventory,sizeof second_inventory);
+    seat->initialized=inventory_initialized;
+    second_inventory=held;inventory_initialized=initialized;
+}
 void mmx4_coop_lifecycle_view_save(void) {
     view_second_inventory=second_inventory;view_saved_inventory=saved_inventory;
     view_inventory_initialized=inventory_initialized;view_inventory_projected=inventory_projected;

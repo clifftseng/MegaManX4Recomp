@@ -1,7 +1,7 @@
 [game]
 name = "Mega Man X4"
 id = "SLUS-00561"
-players = 2
+players = 4  # P1/P2 co-op plus optional local P3/P4 (mmx4.coop extra_players)
 exe = "mmx4/SLUS_005.61"
 disc = "mmx4/Mega Man X4.cue"
 load_address = "0x80010000"

@@ -64,6 +64,9 @@ psxrecomp_v4_add_runtime_target(psx-runtime
     WINDOW_TITLE "MegaManX4Recomp"
     GAME_VERSION "${MMX4_RELEASE_VERSION}"
     DEFAULT_GAME_CONFIG_PATH "game.toml"
+    # Four host pads for optional local P3/P4. Below 5 the guest still sees
+    # two ordinary ports (no multitap); only the co-op mod reads pads 2..3.
+    MAX_PLAYERS 4
     LAUNCHER_BOXART "${CMAKE_SOURCE_DIR}/recomp/launcher/boxart.tga"
     PRELOADED_MODS_DIR "${MMX4_PRELOADED_MODS}"
     # Loading policy belongs to this title; generic acceleration is retired.
@@ -280,6 +283,7 @@ if(PSX_BUILD_COSIM)
         GAME_GENERATED_DISPATCH_C "${GAME_GENERATED_DISPATCH}"
         WINDOW_TITLE "MMX4-cosim"
         DEFAULT_GAME_CONFIG_PATH "game.toml"
+        MAX_PLAYERS 4
         EXTRAS_SOURCES ${GAME_GENERATED_EXTRAS} ${MMX4_MOD_PLUGIN_SOURCES}
         COSIM
     )

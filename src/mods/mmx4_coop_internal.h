@@ -22,6 +22,12 @@ int mmx4_widescreen_snapshot_ready(void);
 int mmx4_widescreen_snapshot(Mmx4SnapshotIO *s);
 #include "mod_plugins.h"
 #include "mmx4_coop_views.h"
+/* Optional local P3/P4 ("bench" seats). Each one rotates through the private
+ * P2 slot outside any projection, so every P2 path serves it unchanged.
+ * With no extra players configured nothing rotates. */
+#define MMX4_COOP_BENCH_SEATS 2u
+typedef struct { uint8_t bytes[32]; unsigned initialized; } Mmx4CoopSeatInventory;
+void mmx4_coop_lifecycle_swap_inventory(Mmx4CoopSeatInventory *seat);
 #define MMX4_PLAYER 0x801418C8u
 #define MMX4_PLAY 0x801721C0u
 #define MMX4_VEHICLE 0x80173A30u
